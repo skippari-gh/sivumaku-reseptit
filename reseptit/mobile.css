@@ -3,16 +3,17 @@ html,body{max-width:100%;overflow-x:hidden}body{width:100%}img,svg,video,canvas,
   html,body{width:100%;max-width:100%;overflow-x:hidden}
   .hero{width:100%;max-width:100%;min-height:0;max-height:none;aspect-ratio:2/1;background-size:100% auto;background-position:center top;background-repeat:no-repeat}
   .toolbar-shell{position:static;width:100%;max-width:100%}
-  .toolbar{width:100%;max-width:100%;padding:10px 12px;grid-template-columns:minmax(0,1fr);gap:10px}
+  .toolbar{width:100%;max-width:100%;padding:10px 12px;grid-template-columns:minmax(0,1fr);gap:8px}
   .search,.search input{width:100%;max-width:100%;min-width:0}
-  .years{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%;max-width:100%;justify-content:stretch}
-  .years .year-btn{width:100%;min-width:0;padding:8px 4px;font-size:12px;white-space:nowrap}
-  .years .year-btn:first-child{grid-column:1/-1}
+  .years{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;width:100%;max-width:100%;justify-content:stretch}
+  .years .year-btn{width:100%;min-width:0;padding:5px 2px;font-size:10px;line-height:1.05;white-space:nowrap;border-radius:8px}
+  .years .year-btn:first-child{grid-column:span 2}
   .layout{width:100%;max-width:100%;margin:0;grid-template-columns:minmax(0,1fr);gap:20px;padding:16px 12px 50px}
   .layout>*,.layout>section,.sidebar,#content,.category,.recipe-list{width:100%;max-width:100%;min-width:0}
   .sidebar{position:static}
-  .cats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;width:100%;max-width:100%;overflow:visible;padding:0}
-  .cat-btn{width:100%;max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:normal;border:1px solid #d8d1c5;background:#fff;font-size:13px;line-height:1.2}
+  .cats{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;width:100%;max-width:100%;overflow:visible;padding:0}
+  .cat-btn{width:100%;max-width:100%;min-width:0;white-space:normal;overflow-wrap:normal;word-break:normal;border:1px solid #d8d1c5;background:#fff;font-size:15px;line-height:1.25;padding:11px 13px;min-height:44px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;text-align:left;gap:10px}
+  .cat-btn .count{font-size:12px;white-space:nowrap;align-self:center}
   .results-head{width:100%;max-width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
   .results-head>div,.results-head p{max-width:100%}
   .results-head h2{font-size:26px;overflow-wrap:anywhere}
@@ -26,8 +27,11 @@ html,body{max-width:100%;overflow-x:hidden}body{width:100%}img,svg,video,canvas,
   .footer{padding:18px 12px 30px}
 }
 @media(max-width:420px){
-  .years{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .years{grid-template-columns:repeat(5,minmax(0,1fr));gap:3px}
+  .years .year-btn{font-size:9px;padding:5px 1px}
+  .years .year-btn:first-child{grid-column:span 2}
   .cats{grid-template-columns:minmax(0,1fr)}
+  .cat-btn{font-size:15px;padding:11px 12px}
   .layout{padding-left:10px;padding-right:10px}
   .toolbar{padding-left:10px;padding-right:10px}
   .recipe a.name{font-size:17px}
