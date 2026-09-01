@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sivumaku – MTV-reseptit 2012–2019</title>
+<style>
+:root {
+  --ink:#172027; --muted:#6a747c; --paper:#f7f5ef; --card:#fffdfa; --line:#ddd8cc;
+  --accent:#b73524; --accent2:#7f261b; --dark:#1e2a31; --soft:#eee9de; --ok:#2c6d49;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);background-color:var(--paper);background-image:url("/assets/sivumaku-bg.svg");background-size:cover;background-position:center top;background-repeat:no-repeat;background-attachment:fixed}
+a{color:inherit}
+.hero{background:linear-gradient(135deg,rgba(31,44,52,.94) 0%,rgba(43,59,67,.88) 58%,rgba(127,38,27,.78) 100%);color:white;padding:54px 24px 38px;backdrop-filter:blur(1px)}
+.wrap{max-width:1180px;margin:0 auto}
+.kicker{font-size:12px;text-transform:uppercase;letter-spacing:.18em;opacity:.75;font-weight:700}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(42px,7vw,78px);line-height:.95;margin:12px 0 18px;max-width:850px;font-weight:700}
+.lead{max-width:760px;font-size:18px;line-height:1.55;color:#e9ecee;margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:28px}
+.stat{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);padding:10px 14px;border-radius:999px;font-size:13px}
+.toolbar-shell{position:sticky;top:0;z-index:20;background:rgba(247,245,239,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}
+.toolbar{max-width:1180px;margin:auto;padding:14px 24px;display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px;align-items:center}
+.search{position:relative}
+.search input{width:100%;border:1px solid #cfc8bb;background:white;border-radius:12px;padding:13px 42px 13px 14px;font-size:15px;outline:none}
+.search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(183,53,36,.10)}
+.search span{position:absolute;right:14px;top:12px;color:var(--muted)}
+.years{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+button{font:inherit}
+.year-btn,.cat-btn{border:1px solid #cfc8bb;background:#fff;border-radius:999px;padding:9px 11px;cursor:pointer;color:#3d474e}
+.year-btn:hover,.cat-btn:hover{border-color:#9c9182}
+.year-btn.active,.cat-btn.active{background:var(--dark);border-color:var(--dark);color:white}
+.layout{max-width:1180px;margin:24px auto 40px;display:grid;grid-template-columns:240px minmax(0,1fr);gap:34px;padding:30px 24px 70px;background:rgba(247,245,239,.86);backdrop-filter:blur(10px);border:1px solid rgba(221,216,204,.78);border-radius:18px;box-shadow:0 18px 60px rgba(30,42,49,.10)}
+.sidebar{position:sticky;top:82px;align-self:start}
+.sidebar h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.cats{display:flex;flex-direction:column;gap:6px}
+.cat-btn{text-align:left;border-radius:9px;background:transparent;border-color:transparent;padding:9px 10px;display:flex;justify-content:space-between;gap:10px}
+.cat-btn .count{font-variant-numeric:tabular-nums;color:var(--muted)}
+.cat-btn.active .count{color:#dfe6e8}
+.results-head{display:flex;justify-content:space-between;align-items:end;gap:18px;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:14px}
+.results-head h2{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:31px}
+.results-head p{margin:0;color:var(--muted);font-size:13px}
+.category{margin:0 0 44px}
+.category-title{display:flex;align-items:center;gap:11px;margin:0 0 12px;font-family:Georgia,"Times New Roman",serif;font-size:29px}
+.category-title .icon{color:var(--accent);font-family:system-ui}
+.recipe-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.recipe{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px 13px;min-height:96px;display:flex;flex-direction:column;justify-content:space-between;transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease}
+.recipe:hover{transform:translateY(-1px);border-color:#c5bcad;box-shadow:0 5px 18px rgba(45,39,31,.06)}
+.recipe a.name{font-family:Georgia,"Times New Roman",serif;font-size:18px;line-height:1.25;text-decoration:none;font-weight:700}
+.recipe a.name:hover{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:999px;background:#e7f2eb;color:var(--ok);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.badge.searchlink{background:#f2e8d6;color:#835d20}
+.subgroup{color:#857b6d}
+.empty{display:none;background:white;border:1px dashed #c8c0b4;border-radius:14px;padding:30px;text-align:center;color:var(--muted)}
+.note{margin-top:28px;padding:16px 18px;border-radius:12px;background:#eee9de;color:#5f594f;font-size:13px;line-height:1.55}
+.footer{border-top:1px solid rgba(221,216,204,.8);padding:22px 24px 40px;color:var(--muted);font-size:12px;background:rgba(247,245,239,.84);backdrop-filter:blur(10px)}
+.hidden{display:none!important}
+mark{background:#f5db7c;color:inherit;border-radius:3px;padding:0 1px}
+@media(max-width:850px){
+  body{background-size:auto 100vh;background-position:center top;background-attachment:scroll}
+  .layout{margin:12px 10px 28px;border-radius:14px;padding-left:14px;padding-right:14px}
+  .toolbar{grid-template-columns:1fr}
+  .years{justify-content:flex-start}
+  .layout{grid-template-columns:1fr;padding-top:20px}
+  .sidebar{position:static}
+  .cats{flex-direction:row;overflow:auto;padding-bottom:6px}
+  .cat-btn{white-space:nowrap;border:1px solid #d8d1c5;background:#fff}
+  .recipe-list{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker">Sivumaku × MTV · 2012–2019</div>
+    <h1>Kaikki reseptit yhdessä paikassa</h1>
+    <p class="lead">Sivumaun MTV-kauden reseptihakemisto ruokalajeittain. Hae nimellä, rajaa vuoteen tai selaa kategorioita. Reseptin nimi avaa MTV:n sivun uuteen välilehteen.</p>
+    <div class="stats">
+      <div class="stat"><strong>324</strong> reseptiyksikköä</div>
+      <div class="stat"><strong>250</strong> suoraa MTV-reseptilinkkiä</div>
+      <div class="stat"><strong>289</strong> tarkkaa julkaisupäivää</div>
+      <div class="stat">Koko MTV-kausi 2012–2019</div>
+    </div>
+  </div>
+</header>
+
+<div class="toolbar-shell">
+  <div class="toolbar">
+    <label class="search">
+      <input id="search" type="search" placeholder="Hae reseptiä, esim. risotto, kana, lasagne…" autocomplete="off">
+      <span>⌕</span>
+    </label>
+    <div class="years" id="years"></div>
+  </div>
+</div>
+
+<main class="layout">
+  <aside class="sidebar">
+    <h2>Ruokalajit</h2>
+    <div class="cats" id="cats"></div>
+  </aside>
+
+  <section>
+    <div class="results-head">
+      <div><h2 id="view-title">Kaikki reseptit</h2><p id="result-count"></p></div>
+      <p>↗ avautuu MTV:n sivulle</p>
+    </div>
+    <div id="content"></div>
+    <div class="empty" id="empty">Hakuehdoilla ei löytynyt reseptejä.</div>
+    <div class="note">
+      <strong>Linkkien tila:</strong> vihreä “MTV-resepti” tarkoittaa varmennettua suoraa reseptisivua.
+      Ruskea “MTV-haku” tarkoittaa, että resepti kuuluu masteriin, mutta alkuperäinen suora URL on vielä palauttamatta;
+      nimi avaa silloin MTV Uutisten haun kyseisellä reseptinimellä. Julkaisupäivän kohdalla näkyy vastaavasti selvästi,
+      jos tarkka päivä on vielä tarkistuksessa.
+    </div>
+  </section>
+</main>
+
+<footer class="footer"><div class="wrap">Sivumaku-reseptihakemisto · aineisto koottu MTV Uutisten Sivumaku-arkistosta ja vanhoista Sivumaku-koosteista.</div></footer>
+
+<script src="/reseptit/data1.js"></script>
+<script src="/reseptit/data2.js"></script>
+<script src="/reseptit/data3.js"></script>
+<script src="/reseptit/data4.js"></script>
+<script src="/reseptit/data5.js"></script>
+<script src="/reseptit/data6.js"></script>
+<script src="/reseptit/data7.js"></script>
+<script>
+const DATA=window.SIVUMAKU_DATA||[];
+const GROUPS=["Lihapullat", "Kana", "Kala & äyriäiset", "Liha", "Pasta & lasagne", "Risotto & riisi", "Texmex & meksikolainen", "Keitot", "Kasvis & lisukkeet", "Kastikkeet & tahnat", "Pizza & leivät", "Jälkiruoat & makeat", "Muut"];
+const YEARS=[2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019];
+let state={q:"",year:"all",group:"all"};
+
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+const norm=s=>String(s??"").toLocaleLowerCase("fi");
+
+function groupCounts(items){
+  const m={};
+  items.forEach(x=>m[x.group]=(m[x.group]||0)+1);
+  return m;
+}
+function renderControls(){
+  const years=document.getElementById("years");
+  years.innerHTML=`<button class="year-btn active" data-year="all">Kaikki vuodet</button>`+
+    YEARS.map(y=>`<button class="year-btn" data-year="${y}">${y}</button>`).join("");
+  years.onclick=e=>{
+    const b=e.target.closest("button"); if(!b)return;
+    state.year=b.dataset.year;
+    [...years.children].forEach(x=>x.classList.toggle("active",x===b));
+    render();
+  };
+  const counts=groupCounts(DATA);
+  const cats=document.getElementById("cats");
+  cats.innerHTML=`<button class="cat-btn active" data-group="all"><span>Kaikki</span><span class="count">${DATA.length}</span></button>`+
+    GROUPS.filter(g=>counts[g]).map(g=>`<button class="cat-btn" data-group="${esc(g)}"><span>${esc(g)}</span><span class="count">${counts[g]}</span></button>`).join("");
+  cats.onclick=e=>{
+    const b=e.target.closest("button"); if(!b)return;
+    state.group=b.dataset.group;
+    [...cats.children].forEach(x=>x.classList.toggle("active",x===b));
+    render();
+  };
+}
+function filtered(){
+  const q=norm(state.q.trim());
+  return DATA.filter(x=>{
+    if(state.year!=="all" && String(x.year)!==state.year)return false;
+    if(state.group!=="all" && x.group!==state.group)return false;
+    if(q && !norm(x.name+" "+x.group+" "+x.subgroup+" "+(x.year||"")).includes(q))return false;
+    return true;
+  });
+}
+function itemHTML(x){
+  const badge=x.direct
+    ? `<span class="badge">↗ MTV-resepti</span>`
+    : `<span class="badge searchlink">⌕ MTV-haku</span>`;
+  return `<article class="recipe">
+    <a class="name" href="${esc(x.href)}" target="_blank" rel="noopener noreferrer">${esc(x.name)}</a>
+    <div class="meta"><span>${esc(x.date)}</span>${x.subgroup?`<span class="subgroup">· ${esc(x.subgroup)}</span>`:""}${badge}</div>
+  </article>`;
+}
+function render(){
+  const items=filtered();
+  const content=document.getElementById("content");
+  const empty=document.getElementById("empty");
+  const title=document.getElementById("view-title");
+  const count=document.getElementById("result-count");
+  title.textContent=state.group==="all"?"Kaikki reseptit":state.group;
+  count.textContent=`${items.length} reseptiä`+(state.year!=="all"?` · ${state.year}`:"");
+  if(!items.length){content.innerHTML="";empty.style.display="block";return;}
+  empty.style.display="none";
+  const groups=GROUPS.filter(g=>items.some(x=>x.group===g));
+  content.innerHTML=groups.map(g=>{
+    const gi=items.filter(x=>x.group===g);
+    return `<section class="category" id="${encodeURIComponent(g)}">
+      <h3 class="category-title"><span class="icon">${esc({"Lihapullat": "●", "Kana": "◒", "Kala & äyriäiset": "≈", "Liha": "◆", "Pasta & lasagne": "⌁", "Risotto & riisi": "◌", "Texmex & meksikolainen": "✦", "Keitot": "◉", "Kasvis & lisukkeet": "❧", "Kastikkeet & tahnat": "✺", "Pizza & leivät": "△", "Jälkiruoat & makeat": "◇", "Muut": "•"}[g]||"•")}</span>${esc(g)} <small style="font:600 12px system-ui;color:#8a8175">${gi.length}</small></h3>
+      <div class="recipe-list">${gi.map(itemHTML).join("")}</div>
+    </section>`;
+  }).join("");
+}
+document.getElementById("search").addEventListener("input",e=>{state.q=e.target.value;render();});
+renderControls(); render();
+</script>
+</body>
+</html>
