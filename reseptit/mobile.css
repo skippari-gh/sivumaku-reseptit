@@ -1,38 +1,39 @@
-html,body{max-width:100%;overflow-x:hidden}body{width:100%}img,svg,video,canvas,iframe{max-width:100%;height:auto}*{min-width:0}
+html,body{max-width:100%!important;overflow-x:hidden!important}body{width:100%!important}img,svg,video,canvas,iframe{max-width:100%!important;height:auto}*{min-width:0}
 @media(max-width:850px){
-  html,body{width:100%;max-width:100%;overflow-x:hidden}
-  .hero{width:100%;max-width:100%;min-height:0;max-height:none;aspect-ratio:2/1;background-size:100% auto;background-position:center top;background-repeat:no-repeat}
-  .toolbar-shell{position:static;width:100%;max-width:100%}
-  .toolbar{width:100%;max-width:100%;padding:10px 12px;grid-template-columns:minmax(0,1fr);gap:8px}
-  .search,.search input{width:100%;max-width:100%;min-width:0}
-  .years{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;width:100%;max-width:100%;justify-content:stretch}
-  .years .year-btn{width:100%;min-width:0;padding:5px 2px;font-size:10px;line-height:1.05;white-space:nowrap;border-radius:8px}
-  .years .year-btn:first-child{grid-column:span 2}
-  .layout{width:100%;max-width:100%;margin:0;grid-template-columns:minmax(0,1fr);gap:20px;padding:16px 12px 50px}
-  .layout>*,.layout>section,.sidebar,#content,.category,.recipe-list{width:100%;max-width:100%;min-width:0}
-  .sidebar{position:static}
-  .cats{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;width:100%;max-width:100%;overflow:visible;padding:0}
-  .cat-btn{width:100%;max-width:100%;min-width:0;white-space:normal;overflow-wrap:normal;word-break:normal;border:1px solid #d8d1c5;background:#fff;font-size:15px;line-height:1.25;padding:11px 13px;min-height:44px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;text-align:left;gap:10px}
-  .cat-btn .count{font-size:12px;white-space:nowrap;align-self:center}
-  .results-head{width:100%;max-width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
-  .results-head>div,.results-head p{max-width:100%}
-  .results-head h2{font-size:26px;overflow-wrap:anywhere}
-  .category-title{font-size:24px;line-height:1.1;flex-wrap:wrap;overflow-wrap:anywhere}
-  .recipe-list{grid-template-columns:minmax(0,1fr);gap:9px}
-  .recipe{width:100%;max-width:100%;min-width:0;overflow:hidden;padding:13px 14px}
-  .recipe a.name,.meta,.note,.footer{max-width:100%;overflow-wrap:anywhere;word-break:break-word}
-  .meta{gap:6px}
-  .badge{max-width:100%;white-space:normal}
-  .note{padding:14px}
-  .footer{padding:18px 12px 30px}
+  html,body{width:100%!important;max-width:100%!important;overflow-x:hidden!important}
+  .hero{width:100%!important;max-width:100%!important;min-height:0!important;max-height:none!important;aspect-ratio:2/1!important;background-size:100% auto!important;background-position:center top!important;background-repeat:no-repeat!important}
+  .toolbar-shell{position:static!important;width:100%!important;max-width:100%!important}
+  .toolbar{width:100%!important;max-width:100%!important;padding:10px 12px!important;grid-template-columns:minmax(0,1fr)!important;gap:8px!important}
+  .search,.search input{width:100%!important;max-width:100%!important;min-width:0!important}
+  .years{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:4px!important;width:100%!important;max-width:100%!important;justify-content:stretch!important}
+  .years .year-btn{width:100%!important;min-width:0!important;padding:5px 2px!important;font-size:10px!important;line-height:1.05!important;white-space:nowrap!important;border-radius:8px!important}
+  .years .year-btn:first-child{grid-column:span 2!important}
+  .layout{width:100%!important;max-width:100%!important;margin:0!important;grid-template-columns:minmax(0,1fr)!important;gap:20px!important;padding:16px 12px 50px!important}
+  .layout>*,.layout>section,.sidebar,#content,.category,.recipe-list{width:100%!important;max-width:100%!important;min-width:0!important}
+  .sidebar{position:static!important}
+  .cats{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:7px!important;width:100%!important;max-width:100%!important;overflow:visible!important;padding:0!important}
+  .cat-btn{width:100%!important;max-width:100%!important;min-width:0!important;white-space:normal!important;overflow-wrap:normal!important;word-break:normal!important;border:1px solid #d8d1c5!important;background:#fff!important;font-size:15px!important;line-height:1.25!important;padding:11px 13px!important;min-height:46px!important;display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center!important;text-align:left!important;gap:10px!important;border-radius:10px!important}
+  .cat-btn span:first-child{white-space:normal!important;overflow-wrap:break-word!important;word-break:normal!important}
+  .cat-btn .count{font-size:12px!important;white-space:nowrap!important;align-self:center!important}
+  .results-head{width:100%!important;max-width:100%!important;display:flex!important;flex-direction:column!important;align-items:flex-start!important;gap:4px!important}
+  .results-head>div,.results-head p{max-width:100%!important}
+  .results-head h2{font-size:26px!important;overflow-wrap:anywhere!important}
+  .category-title{font-size:24px!important;line-height:1.1!important;flex-wrap:wrap!important;overflow-wrap:anywhere!important}
+  .recipe-list{grid-template-columns:minmax(0,1fr)!important;gap:9px!important}
+  .recipe{width:100%!important;max-width:100%!important;min-width:0!important;overflow:hidden!important;padding:13px 14px!important}
+  .recipe a.name,.meta,.note,.footer{max-width:100%!important;overflow-wrap:anywhere!important;word-break:break-word!important}
+  .meta{gap:6px!important}
+  .badge{max-width:100%!important;white-space:normal!important}
+  .note{padding:14px!important}
+  .footer{padding:18px 12px 30px!important}
 }
 @media(max-width:420px){
-  .years{grid-template-columns:repeat(5,minmax(0,1fr));gap:3px}
-  .years .year-btn{font-size:9px;padding:5px 1px}
-  .years .year-btn:first-child{grid-column:span 2}
-  .cats{grid-template-columns:minmax(0,1fr)}
-  .cat-btn{font-size:15px;padding:11px 12px}
-  .layout{padding-left:10px;padding-right:10px}
-  .toolbar{padding-left:10px;padding-right:10px}
-  .recipe a.name{font-size:17px}
+  .years{grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:3px!important}
+  .years .year-btn{font-size:9px!important;padding:5px 1px!important}
+  .years .year-btn:first-child{grid-column:span 2!important}
+  .cats{grid-template-columns:minmax(0,1fr)!important}
+  .cat-btn{font-size:15px!important;padding:12px!important;min-height:48px!important}
+  .layout{padding-left:10px!important;padding-right:10px!important}
+  .toolbar{padding-left:10px!important;padding-right:10px!important}
+  .recipe a.name{font-size:17px!important}
 }
