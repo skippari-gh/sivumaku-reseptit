@@ -1,4 +1,4 @@
-name: Inspect MTV recipe source
+name: Inspect MTV recipe search
 on:
   push:
     branches: [main]
@@ -9,25 +9,31 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install requests
-      - shell: python
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: npm init -y && npm install playwright
+      - run: npx playwright install --with-deps chromium
+      - shell: bash
         run: |
-          import requests,re
-          u='https://www.mtvuutiset.fi/makuja/artikkeli/pikaruokaa-rakuunakana/6235650'
-          r=requests.get(u,headers={'User-Agent':'Mozilla/5.0'},timeout=30)
-          print('status',r.status_code,'len',len(r.text),'url',r.url,flush=True)
-          open('mtv_raw.html','w',encoding='utf-8').write(r.text)
-          hits=[]
-          for pat in ['rakuuna','articleBody','6235650','broilerin','crème','__NEXT_DATA__','application/ld+json','content']:
-              m=re.search(pat,r.text,re.I)
-              if m:hits.append(r.text[max(0,m.start()-1000):m.start()+8000])
-          open('mtv_hits.txt','w',encoding='utf-8').write('\n\n===== HIT =====\n\n'.join(hits))
+          cat > /tmp/search.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const page=await browser.newPage();
+          const q='Papas Rellenas';
+          const u='https://www.mtvuutiset.fi/haku?q='+encodeURIComponent(q);
+          await page.goto(u,{waitUntil:'domcontentloaded',timeout:60000});
+          await page.waitForTimeout(7000);
+          const links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||'').trim(),href:a.href})).filter(x=>x.href.includes('mtvuutiset.fi')));
+          console.log(JSON.stringify(links,null,2));
+          await page.screenshot({path:'search.png',fullPage:true});
+          await browser.close();
+          JS
+          node /tmp/search.mjs > search-links.json
+          cat search-links.json
       - uses: actions/upload-artifact@v4
         with:
-          name: mtv-source-debug
+          name: mtv-search-debug
           path: |
-            mtv_raw.html
-            mtv_hits.txt
+            search-links.json
+            search.png
           retention-days: 1
