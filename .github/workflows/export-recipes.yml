@@ -17,99 +17,111 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install requests beautifulsoup4 lxml
+      - run: pip install requests
       - name: Export recipes
         shell: python
         run: |
           import json,re,html,unicodedata,threading
           from pathlib import Path
-          from urllib.parse import urlparse,parse_qs,quote_plus,unquote
+          from urllib.parse import quote_plus,urlparse,unquote
           from difflib import SequenceMatcher
           from concurrent.futures import ThreadPoolExecutor,as_completed
           import requests
-          from bs4 import BeautifulSoup
           GROUPS=["Lihapullat","Kana","Kala & äyriäiset","Liha","Pasta & lasagne","Risotto & riisi","Texmex & meksikolainen","Keitot","Kasvis & lisukkeet","Kastikkeet & tahnat","Pizza & leivät","Jälkiruoat & makeat","Muut"]
           entries=[]
           for p in sorted(Path('reseptit').glob('data*.js')):
               m=re.search(r'\.concat\((\[.*\])\);?\s*$',p.read_text(encoding='utf-8'),re.S); entries+=json.loads(m.group(1))
           print('Loaded',len(entries),flush=True)
           local=threading.local()
-          def session():
+          def sess():
               if not hasattr(local,'s'):
-                  local.s=requests.Session();local.s.headers.update({'User-Agent':'Mozilla/5.0 (compatible; SivumakuRecipeArchive/1.0)'})
+                  local.s=requests.Session(); local.s.headers.update({'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/152 Safari/537.36'})
               return local.s
           def norm(s):
-              s=unicodedata.normalize('NFKD',s or '').encode('ascii','ignore').decode().lower();return re.sub(r'\s+',' ',re.sub(r'[^a-z0-9]+',' ',s)).strip()
-          def sim(a,b):return SequenceMatcher(None,norm(a),norm(b)).ratio()
-          def clean(u):
-              if not u:return ''
-              if u.startswith('//'):u='https:'+u
-              if 'duckduckgo.com/l/?' in u:
-                  q=parse_qs(urlparse(u).query)
-                  if q.get('uddg'):u=unquote(q['uddg'][0])
-              return u.split('#')[0]
-          def article_candidates(text,title):
-              s=BeautifulSoup(text,'lxml');out=[]
-              for a in s.find_all('a',href=True):
-                  u=clean(a['href']);u=('https://www.mtvuutiset.fi'+u) if u.startswith('/') else u
-                  if 'mtvuutiset.fi/' not in u or '/haku?' in u:continue
-                  if '/makuja/' not in u and '/artikkeli/' not in u and '/sivumaku/' not in u:continue
-                  label=' '.join(a.stripped_strings);score=max(sim(label,title),sim(urlparse(u).path.replace('-',' '),title))
-                  out.append((score,u,label))
-              seen=set();ans=[]
-              for x in sorted(out,reverse=True):
-                  if x[1] not in seen:seen.add(x[1]);ans.append(x)
-              return ans
-          def resolve(e):
-              title=e['name']; q=quote_plus('site:mtvuutiset.fi/makuja '+title)
-              for u in [e.get('href',''),f'https://www.google.com/search?q={q}',f'https://www.bing.com/search?q={q}',f'https://html.duckduckgo.com/html/?q={q}']:
-                  try:
-                      r=session().get(u,timeout=15)
-                      if r.status_code!=200:continue
-                      good=[x for x in article_candidates(r.text,title) if x[0]>=.52]
-                      if good:return good[0][1]
-                  except Exception:pass
-              return ''
-          def reader(url):
-              r=session().get('https://r.jina.ai/'+url,timeout=30)
-              return r.text if r.status_code==200 and len(r.text)>80 else ''
-          def extract(text,title):
-              if not text:return []
-              lines=[]
-              for raw in text.splitlines():
-                  x=html.unescape(raw.strip());x=re.sub(r'^#{1,6}\s*','',x).strip();x=re.sub(r'^[-*]\s+','',x).strip()
-                  if not x or x.startswith('Image ') or x.startswith('![Image'):continue
-                  if x.startswith('URL Source:') or x.startswith('Markdown Content:') or x.startswith('Title:'):continue
-                  if lines and x==lines[-1]:continue
-                  lines.append(x)
-              nt=norm(title);starts=[]
-              for i,x in enumerate(lines):
-                  nx=norm(x)
-                  if not nx or len(x)>180:continue
-                  score=SequenceMatcher(None,nx,nt).ratio()
-                  if nt in nx or nx in nt or score>.68:starts.append((score,i))
-              start=max(starts,key=lambda z:(z[1],z[0]))[1] if starts else 0
-              stop=('Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','Seuraa meitä','Jaa artikkeli','MTV Oy','All rights reserved','Seuraavaksi')
-              out=[]
-              for x in lines[start:]:
-                  if out and any(x.startswith(t) for t in stop):break
-                  if x.startswith('http://') or x.startswith('https://'):continue
-                  out.append(x)
-                  if len(out)>=220:break
-              return out
+              s=unicodedata.normalize('NFKD',s or '').encode('ascii','ignore').decode().lower(); return re.sub(r'\s+',' ',re.sub(r'[^a-z0-9]+',' ',s)).strip()
+          def score(a,b): return SequenceMatcher(None,norm(a),norm(b)).ratio()
+          CHILD_RE=re.compile(r'\\"children\\":(?:\[)?\\"((?:\\\\.|[^"\\])*)\\"')
+          def strings_from_html(src):
+              vals=[]
+              for m in CHILD_RE.finditer(src):
+                  try:v=json.loads('"'+m.group(1)+'"')
+                  except:continue
+                  v=html.unescape(v).strip()
+                  if v: vals.append(v)
+              return vals
+          def extract_article(src,title):
+              vals=strings_from_html(src); nt=norm(title)
+              # Choose the first article H1-like title occurrence after site navigation; it is followed by article body strings.
+              cand=[]
+              for i,v in enumerate(vals):
+                  nv=norm(v)
+                  if len(v)<220 and nv:
+                      sc=score(v,title)
+                      if nt in nv or nv in nt or sc>=.70: cand.append((i,sc,v))
+              if not cand:return []
+              # Prefer a title match that has long prose/ingredient-like content soon after it.
+              def quality(c):
+                  i,sc,_=c; window=vals[i+1:i+35]
+                  useful=sum(1 for x in window if len(x)>20 and not x.startswith('$'))
+                  return (useful,sc,-i)
+              start=max(cand,key=quality)[0]
+              out=[]; started=False
+              STOP=('Lisää aiheesta:','Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','MTV Oy, All rights reserved','Release number:','Lifestyle','Uutiset')
+              for x in vals[start:]:
+                  if x.startswith('$') or x in {'...','Julkaistu ','Jaa artikkeli'}:continue
+                  if out and any(x.startswith(t) for t in STOP):break
+                  if x==title and out:continue
+                  # skip obvious site chrome after body starts
+                  if x in {'Etusivu','Haku','Kirjaudu','Valikko'}:continue
+                  out.append(x); started=True
+                  if len(out)>=180:break
+              # De-duplicate accidental repeated adjacent strings.
+              clean=[]
+              for x in out:
+                  if not clean or x!=clean[-1]:clean.append(x)
+              return clean
+          URL_RE=re.compile(r'(?:https?:\\?/\\?/www\.mtvuutiset\.fi)?\\?/makuja/(?:artikkeli|sivumaku/blogi)/[^"\\<> ]+/\d{6,8}')
+          def decode_url(u):
+              u=u.replace('\\/','/').replace('\\u0026','&')
+              if u.startswith('/'):u='https://www.mtvuutiset.fi'+u
+              return u
+          def resolve_search(e):
+              title=e['name']; q=quote_plus(title)
+              pages=[e.get('href',''),f'https://www.mtvuutiset.fi/haku?q={q}',f'https://www.google.com/search?q={quote_plus("site:mtvuutiset.fi/makuja "+title)}',f'https://www.bing.com/search?q={quote_plus("site:mtvuutiset.fi/makuja "+title)}']
+              best=[]
+              for page in pages:
+                  if not page:continue
+                  try:r=sess().get(page,timeout=18)
+                  except:continue
+                  src=r.text
+                  urls=[]
+                  for m in URL_RE.finditer(src):urls.append(decode_url(m.group(0)))
+                  # Also catch fully escaped absolute URLs.
+                  for m in re.finditer(r'https:\\/\\/www\.mtvuutiset\.fi\\/makuja\\/(?:artikkeli|sivumaku\\/blogi)\\/[^" ]+?\\/\d{6,8}',src):urls.append(decode_url(m.group(0)))
+                  for u in set(urls):
+                      path=unquote(urlparse(u).path).replace('-',' ')
+                      sc=score(path,title)
+                      # Nearby title strings can improve score.
+                      pos=src.find(u.replace('/','\\/'))
+                      nearby=src[max(0,pos-1200):pos+500] if pos>=0 else ''
+                      sc=max(sc,score(nearby,title)*.75)
+                      best.append((sc,u))
+                  if best and max(best)[0]>=.48:break
+              return max(best)[1] if best and max(best)[0]>=.35 else ''
           def one(ix,e):
-              url=e.get('href','') if e.get('direct') and '/haku?' not in e.get('href','') else resolve(e)
+              url=e.get('href','') if e.get('direct') and '/haku?' not in e.get('href','') else resolve_search(e)
               if not url:return ix,{**e,'resolved_url':'','extract_status':'UNRESOLVED_URL','recipe_lines':[]}
               try:
-                  lines=extract(reader(url),e['name']);chars=len('\n'.join(lines));status='OK' if chars>=100 else 'SHORT_EXTRACTION'
-                  return ix,{**e,'resolved_url':url,'extract_status':status,'recipe_lines':lines}
+                  r=sess().get(url,timeout=25); src=r.text; lines=extract_article(src,e['name']); chars=len('\n'.join(lines))
+                  status='OK' if chars>=120 else 'SHORT_EXTRACTION'
+                  return ix,{**e,'resolved_url':r.url,'extract_status':status,'recipe_lines':lines}
               except Exception as ex:return ix,{**e,'resolved_url':url,'extract_status':f'ERROR_{type(ex).__name__}','recipe_lines':[]}
           results=[None]*len(entries)
           with ThreadPoolExecutor(max_workers=6) as pool:
               futs=[pool.submit(one,i,e) for i,e in enumerate(entries)];done=0
               for f in as_completed(futs):
                   i,r=f.result();results[i]=r;done+=1
-                  if done%20==0 or done==len(entries):print('Done',done,'/',len(entries),'OK',sum(1 for x in results if x and x['extract_status']=='OK'),flush=True)
+                  if done%25==0 or done==len(entries):print('Done',done,'OK',sum(1 for x in results if x and x['extract_status']=='OK'),'unresolved',sum(1 for x in results if x and x['extract_status']=='UNRESOLVED_URL'),flush=True)
           by={g:[] for g in GROUPS}
           for r in results:by.setdefault(r.get('group') or 'Muut',[]).append(r)
           out=['SIVUMAKU – MTV-RESEPTIT 2012–2019','',f'Reseptejä indeksissä: {len(results)}','Ryhmittely: sama kuin Sivumaku-reseptisivulla','']
@@ -127,7 +139,7 @@ jobs:
               vals=[r['name'],r.get('group',''),r.get('date',''),r.get('href',''),r.get('resolved_url',''),r['extract_status'],str(len('\n'.join(r['recipe_lines'])))]
               report.append('\t'.join(v.replace('\t',' ') for v in vals))
           Path('Sivumaku_324_keruuraportti.tsv').write_text('\n'.join(report),encoding='utf-8')
-          print('FINAL OK',sum(r['extract_status']=='OK' for r in results),'/',len(results),flush=True)
+          print('FINAL', {s:sum(r['extract_status']==s for r in results) for s in sorted(set(r['extract_status'] for r in results))},flush=True)
       - uses: actions/upload-artifact@v4
         with:
           name: sivumaku-324-reseptia
