@@ -15,7 +15,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - shell: bash
         run: |
-          cat > /tmp/search.mjs <<'JS'
+          cat > search.mjs <<'JS'
           import { chromium } from 'playwright';
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage();
@@ -28,7 +28,7 @@ jobs:
           await page.screenshot({path:'search.png',fullPage:true});
           await browser.close();
           JS
-          node /tmp/search.mjs > search-links.json
+          node search.mjs > search-links.json
           cat search-links.json
       - uses: actions/upload-artifact@v4
         with:
