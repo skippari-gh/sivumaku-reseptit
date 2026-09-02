@@ -1,0 +1,30 @@
+name: Render old Sivumaku URLs
+on:
+  push:
+    paths: ['.github/workflows/render-old-three.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: npm init -y && npm install playwright && npx playwright install chromium
+      - run: |
+          cat > x.mjs <<'JS'
+          import { chromium } from 'playwright'; import fs from 'fs';
+          const urls=[
+          'https://www.mtv.fi/lifestyle/makuja/sivumaku/blogi/kanaa-senagelalaisittain-kookosriisi/6234900',
+          'https://www.mtv.fi/lifestyle/makuja/sivumaku/blogi/vodkapasta/7213758',
+          'https://www.mtv.fi/lifestyle/makuja/sivumaku/blogi/thaityylinen-nuudeliwokki/7341422',
+          'https://www.mtvuutiset.fi/makuja/artikkeli/hirven-routapaisti-ja-perunakohokas/6235608'
+          ];
+          const b=await chromium.launch({headless:true}); const out={};
+          for(const u of urls){const p=await b.newPage(); try{await p.goto(u,{waitUntil:'domcontentloaded',timeout:60000}); await p.waitForTimeout(1800); out[u]={title:await p.title(),finalUrl:p.url(),text:await p.locator('body').innerText()};}catch(e){out[u]={error:String(e),finalUrl:p.url()}} await p.close();}
+          await b.close(); fs.writeFileSync('old-three.json',JSON.stringify(out,null,2));
+          JS
+          node x.mjs
+      - uses: actions/upload-artifact@v4
+        with: {name: sivumaku-old-three, path: old-three.json, retention-days: 1}
