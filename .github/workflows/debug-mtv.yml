@@ -1,4 +1,4 @@
-name: Inspect missing Sivumaku archive
+name: Inspect dated Sivumaku searches
 on:
   push:
     branches: [main]
@@ -9,48 +9,62 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install requests
-      - shell: python
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: npm init -y && npm install playwright
+      - run: npx playwright install chromium
+      - shell: bash
         run: |
-          import requests,json,re
-          dates=['2012/02/09','2012/02/16','2012/03/01','2012/04/02']
-          out={}
-          s=requests.Session();s.headers.update({'User-Agent':'Mozilla/5.0'})
-          for d in dates:
-              u='https://web.archive.org/cdx/search/cdx'
-              params={'url':f'blogit.mtv.fi/sivumaku/{d}/*','output':'json','filter':'statuscode:200','fl':'timestamp,original,digest','collapse':'urlkey'}
-              try:
-                  r=s.get(u,params=params,timeout=30)
-                  print('CDX',d,r.status_code,r.url,'len',len(r.text));print(r.text[:8000])
-                  out[d]={'status':r.status_code,'text':r.text}
-              except Exception as e:
-                  out[d]={'error':repr(e)}
-          # also inspect known/guessed old URLs and redirects
-          guesses=[
-          'https://blogit.mtv.fi/sivumaku/2012/04/02/omat-suosikit-parmesankana/',
-          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuusto-punajuuritimbaali/',
-          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuustokohokas/',
-          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuustoa-kahdella-tapaa/',
-          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuusto-punajuuritimbaali-ja-vuohenjuustokohokas/',
-          'https://blogit.mtv.fi/sivumaku/2012/02/16/marokkolainen-couscous/',
-          'https://blogit.mtv.fi/sivumaku/2012/03/01/kermainen-sipulikeitto/',
-          'https://blogit.mtv.fi/sivumaku/2012/03/01/sienisalaatti/',
-          'https://blogit.mtv.fi/sivumaku/2012/03/01/kermainen-sipulikeitto-ja-sienisalaatti/',
-          'https://blogit.mtv.fi/sivumaku/2012/03/01/sienisalaatti-ja-kermainen-sipulikeitto/'
-          ]
-          checks=[]
-          for u in guesses:
-              try:
-                  r=s.get(u,allow_redirects=False,timeout=20)
-                  checks.append({'url':u,'status':r.status_code,'location':r.headers.get('location'),'len':len(r.text),'title':re.search(r'<title[^>]*>(.*?)</title>',r.text,re.I|re.S).group(1) if re.search(r'<title[^>]*>(.*?)</title>',r.text,re.I|re.S) else ''})
-              except Exception as e:checks.append({'url':u,'error':repr(e)})
-          out['checks']=checks
-          open('archive-debug.json','w',encoding='utf-8').write(json.dumps(out,ensure_ascii=False,indent=2))
-          print(json.dumps(checks,ensure_ascii=False,indent=2))
+          cat > search.mjs <<'JS'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+          const qs=[
+            ['Parmesaanikana','02.04.2012'],
+            ['Rapea kanaleike minttuisella hernepyreellä','08.04.2018'],
+            ['Raakamakkaralla täytetyt grillisipulit','26.07.2018'],
+            ['Metsäkauris-linssipata rakuunalla','18.10.2018'],
+            ['Moussaka','12.03.2012'],
+            ['Moussaka','02.10.2018'],
+            ['Vodkapasta','03.01.2019'],
+            ['Thaityylinen nuudeliwokki','04.04.2019'],
+            ['Ankan koipi appelsiinirisotto',''],
+            ['Kukkakaali-parsarisotto',''],
+            ['Paprikainen risotto sardellilla buffalomozzarellalla','2019'],
+            ['Kermainen sipulikeitto','01.03.2012'],
+            ['Vuohenjuusto-punajuuritimbaali','09.02.2012'],
+            ['Vuohenjuustokohokas','09.02.2012'],
+            ['Marokkolainen couscous','16.02.2012'],
+            ['Sienisalaatti','01.03.2012'],
+            ['Punaviinikastike','02.02.2012'],
+            ['Tillikastike','15.04.2013'],
+            ['Harissamajoneesi','14.01.2015'],
+            ['Vegaaninen manteliaioli','17.01.2016']
+          ];
+          const browser=await chromium.launch({headless:true});
+          const page=await browser.newPage();
+          let out=[];
+          for(const [title,date] of qs){
+            const queries=[`${title} ${date}`.trim(), title];
+            let all=[];
+            for(const q of queries){
+              try{
+                await page.goto('https://www.mtvuutiset.fi/haku?q='+encodeURIComponent(q),{waitUntil:'domcontentloaded',timeout:45000});
+                await page.waitForTimeout(3000);
+                const links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||a.getAttribute('aria-label')||'').trim(),href:a.href})).filter(x=>x.href.includes('mtvuutiset.fi/makuja/artikkeli/')||x.href.includes('mtvuutiset.fi/makuja/reseptit/resepti/')));
+                for(const x of links) all.push({...x,query:q});
+              }catch(e){all.push({error:String(e),query:q});}
+            }
+            const uniq=[]; const seen=new Set();
+            for(const x of all){if(x.href&&!seen.has(x.href)){seen.add(x.href);uniq.push(x)}}
+            out.push({title,date,results:uniq.slice(0,20)});
+            console.log('\n###',title,date); for(const x of uniq.slice(0,20)) console.log(x.text,'|',x.href,'| via',x.query);
+          }
+          await browser.close();
+          fs.writeFileSync('dated-searches.json',JSON.stringify(out,null,2));
+          JS
+          node search.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: missing-sivumaku-archive
-          path: archive-debug.json
+          name: dated-sivumaku-searches
+          path: dated-searches.json
           retention-days: 1
