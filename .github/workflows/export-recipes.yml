@@ -21,7 +21,7 @@ jobs:
       - name: Export recipes
         shell: python
         run: |
-          import json,re,html,unicodedata,threading,time
+          import json,re,html,unicodedata,threading
           from pathlib import Path
           from urllib.parse import urlparse,parse_qs,quote_plus,unquote
           from difflib import SequenceMatcher
@@ -32,7 +32,7 @@ jobs:
           entries=[]
           for p in sorted(Path('reseptit').glob('data*.js')):
               m=re.search(r'\.concat\((\[.*\])\);?\s*$',p.read_text(encoding='utf-8'),re.S); entries+=json.loads(m.group(1))
-          print('Loaded',len(entries))
+          print('Loaded',len(entries),flush=True)
           local=threading.local()
           def session():
               if not hasattr(local,'s'):
@@ -54,8 +54,7 @@ jobs:
                   u=clean(a['href']);u=('https://www.mtvuutiset.fi'+u) if u.startswith('/') else u
                   if 'mtvuutiset.fi/' not in u or '/haku?' in u:continue
                   if '/makuja/' not in u and '/artikkeli/' not in u and '/sivumaku/' not in u:continue
-                  label=' '.join(a.stripped_strings)
-                  score=max(sim(label,title),sim(urlparse(u).path.replace('-',' '),title))
+                  label=' '.join(a.stripped_strings);score=max(sim(label,title),sim(urlparse(u).path.replace('-',' '),title))
                   out.append((score,u,label))
               seen=set();ans=[]
               for x in sorted(out,reverse=True):
@@ -63,47 +62,37 @@ jobs:
               return ans
           def resolve(e):
               title=e['name']; q=quote_plus('site:mtvuutiset.fi/makuja '+title)
-              urls=[e.get('href',''),f'https://www.google.com/search?q={q}',f'https://www.bing.com/search?q={q}',f'https://html.duckduckgo.com/html/?q={q}']
-              for u in urls:
+              for u in [e.get('href',''),f'https://www.google.com/search?q={q}',f'https://www.bing.com/search?q={q}',f'https://html.duckduckgo.com/html/?q={q}']:
                   try:
                       r=session().get(u,timeout=15)
                       if r.status_code!=200:continue
-                      cc=article_candidates(r.text,title)
-                      good=[x for x in cc if x[0]>=.52]
+                      good=[x for x in article_candidates(r.text,title) if x[0]>=.52]
                       if good:return good[0][1]
                   except Exception:pass
               return ''
           def reader(url):
-              # Jina Reader returns rendered/main-page text even when the source page is JS-heavy.
-              ru='https://r.jina.ai/'+url
-              r=session().get(ru,timeout=30)
-              if r.status_code==200 and len(r.text)>80:return r.text
-              return ''
+              r=session().get('https://r.jina.ai/'+url,timeout=30)
+              return r.text if r.status_code==200 and len(r.text)>80 else ''
           def extract(text,title):
               if not text:return []
-              # Reader output is markdown. Keep only article body around the recipe and trim recirculation.
               lines=[]
               for raw in text.splitlines():
-                  x=html.unescape(raw.strip())
-                  x=re.sub(r'^#{1,6}\s*','',x).strip()
-                  x=re.sub(r'^[-*]\s+','',x).strip()
-                  if not x:continue
-                  if x.startswith('Image ') or x.startswith('![Image'):continue
+                  x=html.unescape(raw.strip());x=re.sub(r'^#{1,6}\s*','',x).strip();x=re.sub(r'^[-*]\s+','',x).strip()
+                  if not x or x.startswith('Image ') or x.startswith('![Image'):continue
                   if x.startswith('URL Source:') or x.startswith('Markdown Content:') or x.startswith('Title:'):continue
                   if lines and x==lines[-1]:continue
                   lines.append(x)
-              nt=norm(title); starts=[]
+              nt=norm(title);starts=[]
               for i,x in enumerate(lines):
                   nx=norm(x)
                   if not nx or len(x)>180:continue
                   score=SequenceMatcher(None,nx,nt).ratio()
-                  if nt in nx or nx in nt or score>.68: starts.append((score,i))
-              # Recipe heading is usually the last strong title-like occurrence after the intro.
+                  if nt in nx or nx in nt or score>.68:starts.append((score,i))
               start=max(starts,key=lambda z:(z[1],z[0]))[1] if starts else 0
-              stop_terms=('Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','Seuraa meitä','Jaa artikkeli','MTV Oy','All rights reserved','Seuraavaksi')
+              stop=('Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','Seuraa meitä','Jaa artikkeli','MTV Oy','All rights reserved','Seuraavaksi')
               out=[]
               for x in lines[start:]:
-                  if out and any(x.startswith(t) for t in stop_terms):break
+                  if out and any(x.startswith(t) for t in stop):break
                   if x.startswith('http://') or x.startswith('https://'):continue
                   out.append(x)
                   if len(out)>=220:break
@@ -112,19 +101,15 @@ jobs:
               url=e.get('href','') if e.get('direct') and '/haku?' not in e.get('href','') else resolve(e)
               if not url:return ix,{**e,'resolved_url':'','extract_status':'UNRESOLVED_URL','recipe_lines':[]}
               try:
-                  text=reader(url); lines=extract(text,e['name'])
-                  chars=len('\n'.join(lines))
-                  status='OK' if chars>=100 else 'SHORT_EXTRACTION'
+                  lines=extract(reader(url),e['name']);chars=len('\n'.join(lines));status='OK' if chars>=100 else 'SHORT_EXTRACTION'
                   return ix,{**e,'resolved_url':url,'extract_status':status,'recipe_lines':lines}
-              except Exception as ex:
-                  return ix,{**e,'resolved_url':url,'extract_status':f'ERROR_{type(ex).__name__}','recipe_lines':[]}
+              except Exception as ex:return ix,{**e,'resolved_url':url,'extract_status':f'ERROR_{type(ex).__name__}','recipe_lines':[]}
           results=[None]*len(entries)
           with ThreadPoolExecutor(max_workers=6) as pool:
-              futs=[pool.submit(one,i,e) for i,e in enumerate(entries)]
-              done=0
+              futs=[pool.submit(one,i,e) for i,e in enumerate(entries)];done=0
               for f in as_completed(futs):
                   i,r=f.result();results[i]=r;done+=1
-                  if done%20==0 or done==len(entries):print('Done',done,'/',len(entries),'OK',sum(x and x['extract_status']=='OK' for x in results))
+                  if done%20==0 or done==len(entries):print('Done',done,'/',len(entries),'OK',sum(1 for x in results if x and x['extract_status']=='OK'),flush=True)
           by={g:[] for g in GROUPS}
           for r in results:by.setdefault(r.get('group') or 'Muut',[]).append(r)
           out=['SIVUMAKU – MTV-RESEPTIT 2012–2019','',f'Reseptejä indeksissä: {len(results)}','Ryhmittely: sama kuin Sivumaku-reseptisivulla','']
@@ -142,7 +127,7 @@ jobs:
               vals=[r['name'],r.get('group',''),r.get('date',''),r.get('href',''),r.get('resolved_url',''),r['extract_status'],str(len('\n'.join(r['recipe_lines'])))]
               report.append('\t'.join(v.replace('\t',' ') for v in vals))
           Path('Sivumaku_324_keruuraportti.tsv').write_text('\n'.join(report),encoding='utf-8')
-          print('FINAL OK',sum(r['extract_status']=='OK' for r in results),'/',len(results))
+          print('FINAL OK',sum(r['extract_status']=='OK' for r in results),'/',len(results),flush=True)
       - uses: actions/upload-artifact@v4
         with:
           name: sivumaku-324-reseptia
