@@ -1,13 +1,10 @@
-name: Export Sivumaku recipes
-
+name: Export Sivumaku recipe-only corpus
 on:
   push:
     branches: [main]
     paths: ['.github/workflows/export-recipes.yml']
-
 permissions:
   contents: read
-
 jobs:
   export:
     runs-on: ubuntu-latest
@@ -15,72 +12,122 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: pip install requests
-      - run: npm init -y && npm install playwright
-      - run: npx playwright install chromium
-      - name: Build index JSON
-        shell: python
-        run: |
-          import json,re
-          from pathlib import Path
-          items=[]
-          for p in sorted(Path('reseptit').glob('data*.js')):
-              m=re.search(r'\.concat\((\[.*\])\);?\s*$',p.read_text(encoding='utf-8'),re.S)
-              items += json.loads(m.group(1))
-          Path('all_entries.json').write_text(json.dumps(items,ensure_ascii=False,indent=2),encoding='utf-8')
-          print('entries',len(items))
-      - name: Resolve search-only recipe URLs with rendered MTV search
-        shell: bash
-        run: |
-          cat > resolve.mjs <<'JS'
-          import { chromium } from 'playwright';
-          import fs from 'fs';
-          const entries=JSON.parse(fs.readFileSync('all_entries.json','utf8'));
-          const missing=entries.filter(e=>!e.direct || (e.href||'').includes('/haku?'));
-          const overrides={
-            'Tilli-vodka-kermakastike':'https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-osa-9-tilli-vodka-kermakastikkeella/6235140',
-            'BBQ-kastike – versio 1':'https://www.mtvuutiset.fi/makuja/artikkeli/bbq-kastike-kahdella-tapaa/6235106',
-            'BBQ-kastike – versio 2':'https://www.mtvuutiset.fi/makuja/artikkeli/bbq-kastike-kahdella-tapaa/6235106',
-            'Teriyaki-kastike – Gaijin/possunkylkiversio':'https://www.mtvuutiset.fi/makuja/artikkeli/possunkylkea-ja-teriyaki-kastiketta-gaijinin-tapaan/6235284',
-            'Pizzaviikko, osa 3 – mestarin opein':'https://www.mtvuutiset.fi/makuja/artikkeli/pizzaviikko-osa-3-mestarin-opein/6235518',
-            'Uppopaistetut maa-artisokat sitruunaisella dipillä':'https://www.mtvuutiset.fi/makuja/artikkeli/uppopaistetut-maa-artisokat-sitruunaisella-dipilla/6235378',
-            'Porsaankyljykset sinappisella viinirypälekastikkeella':'https://www.mtvuutiset.fi/makuja/artikkeli/porsaankyljykset-sinappisella-viinirypalekastikkeella/7287030',
-            'Chorizoa ja hummusta – helppoa ja herkullista':'https://www.mtvuutiset.fi/makuja/artikkeli/chorizoa-ja-hummusta-helppoa-ja-herkullista/7439852',
-            'Pastaa linsseillä – jumalattoman hyvä ja syvä talviruoka':'https://www.mtvuutiset.fi/makuja/artikkeli/pastaa-linsseilla-jumalattoman-hyva-ja-syva-talviruoka/7633998'
-          };
-          function norm(s){return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9åäö]+/g,' ').replace(/\s+/g,' ').trim();}
-          const stop=new Set(['ja','tai','osa','versio','helppo','herkullinen','aito','resepti','se','tavoin','tapaan','kera','kanssa','vol']);
-          function toks(s){return norm(s).split(' ').filter(x=>x.length>1&&!stop.has(x));}
-          function dice(a,b){const A=toks(a),B=toks(b);if(!A.length||!B.length)return 0;let hit=0;const used=new Set();for(const x of A){let j=B.findIndex((y,i)=>!used.has(i)&&(x===y||x.startsWith(y)||y.startsWith(x)));if(j>=0){hit++;used.add(j);}}return 2*hit/(A.length+B.length);}
-          function score(target,link){const text=link.text||'';const path=decodeURIComponent(new URL(link.href).pathname).replace(/[-_/]/g,' ');let s=Math.max(dice(target,text),dice(target,path));const nt=norm(target),nx=norm(text);if(nx.includes(nt)||nt.includes(nx))s=Math.max(s,.94);if(link.href.includes('/makuja/artikkeli/')||link.href.includes('/makuja/sivumaku/blogi/'))s+=.06;if(link.href.includes('/makuja/reseptit/resepti/'))s+=.015;return s;}
-          const browser=await chromium.launch({headless:true});
-          let cursor=0;const resolved=[];
-          async function worker(id){const page=await browser.newPage();while(true){const i=cursor++;if(i>=missing.length)break;const e=missing[i];if(overrides[e.name]){resolved.push({name:e.name,url:overrides[e.name],score:1,via:'override'});console.log(`[${i+1}/${missing.length}] override ${e.name}`);continue;}let links=[];try{await page.goto('https://www.mtvuutiset.fi/haku?q='+encodeURIComponent(e.name),{waitUntil:'domcontentloaded',timeout:45000});await page.waitForTimeout(3200);links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||a.getAttribute('aria-label')||'').trim(),href:a.href})).filter(x=>/mtvuutiset\.fi\/(makuja\/)?(artikkeli|makuja\/sivumaku\/blogi|makuja\/reseptit\/resepti)/.test(x.href)));}catch(err){console.log('search error',e.name,String(err));}
-              const uniq=[...new Map(links.map(x=>[x.href,x])).values()];const ranked=uniq.map(x=>({...x,score:score(e.name,x)})).sort((a,b)=>b.score-a.score);const best=ranked[0];resolved.push({name:e.name,url:best?.href||'',score:best?.score||0,text:best?.text||'',alternatives:ranked.slice(0,5),via:'mtv-search'});console.log(`[${i+1}/${missing.length}] ${(best?.score||0).toFixed(2)} ${e.name} -> ${best?.href||'NONE'}`);}
-            await page.close();}
-          await Promise.all(Array.from({length:4},(_,i)=>worker(i)));
-          await browser.close();
-          resolved.sort((a,b)=>missing.findIndex(x=>x.name===a.name)-missing.findIndex(x=>x.name===b.name));
-          fs.writeFileSync('resolved_urls.json',JSON.stringify(resolved,null,2));
-          console.log('resolved',resolved.filter(x=>x.url).length,'/',missing.length,'low confidence',resolved.filter(x=>x.score<.45).length);
-          JS
-          node resolve.mjs
-      - name: Fetch and extract all recipe text
+        with: {python-version: '3.12'}
+      - run: pip install requests beautifulsoup4 lxml
+      - name: Extract only recipe sections
         shell: python
         run: |
           import json,re,html,unicodedata,threading
           from pathlib import Path
-          from difflib import SequenceMatcher
           from concurrent.futures import ThreadPoolExecutor,as_completed
+          from difflib import SequenceMatcher
           import requests
+          from bs4 import BeautifulSoup,Tag
+
           GROUPS=["Lihapullat","Kana","Kala & äyriäiset","Liha","Pasta & lasagne","Risotto & riisi","Texmex & meksikolainen","Keitot","Kasvis & lisukkeet","Kastikkeet & tahnat","Pizza & leivät","Jälkiruoat & makeat","Muut"]
-          entries=json.loads(Path('all_entries.json').read_text(encoding='utf-8'))
-          resolved={x['name']:x for x in json.loads(Path('resolved_urls.json').read_text(encoding='utf-8'))}
+
+          RESOLVED=json.loads(r'''{
+            "Papas Rellenas": "https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-osa-15-papas-rellenas-jauheliha-perunakroketit/6234612",
+            "Lihapullat osa 18 – possupullat punaviini-tomaattikastikkeessa": "https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-possupullat-punaviini-tomaattikastikkeessa/6234826",
+            "Lihapullat osa 26 – vasikkapullat ricottalla": "https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-osa-26-vasikkapullat-ricottalla/7225578",
+            "Lihapullat osa 3 – Kreikka": "https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-osa-3-kreikka/6234992",
+            "Parmesaanikana": "https://www.mtvuutiset.fi/makuja/artikkeli/parmesaanikana/6234920",
+            "Kanaa kookosriisillä senegalilaisittain": "https://www.mtvuutiset.fi/makuja/artikkeli/kanaa-senagelalaisittain-kookosriisi/6234900",
+            "Rapea kanaleike minttuisella hernepyreellä": "https://www.mtvuutiset.fi/makuja/artikkeli/kanaleike-minttuisella-hernepyreella/6845556",
+            "Buffalo Wings": "https://www.mtvuutiset.fi/makuja/artikkeli/buffalo-wings-parhaat-jenkkisiivet-kotikonstein/6234576",
+            "Lohirillette": "https://www.mtvuutiset.fi/makuja/artikkeli/lohirillette-suurin-herkkuni-joulupoydassa/6702876",
+            "Turskaa punasikurin, papujen ja sitruunavinegretin kanssa": "https://www.mtvuutiset.fi/makuja/artikkeli/perjantaikalaa-punasikurin-papujen-ja-sitruunavinegretin-kanssa/6234552",
+            "Daube Provençal – provencelainen härkäpata": "https://www.mtvuutiset.fi/makuja/artikkeli/daube-provencal-provencelainen-harkapata/6235270",
+            "Brie-juustoburgeri Worcestershire-majoneesilla": "https://www.mtvuutiset.fi/makuja/artikkeli/brie-juustoburgeri-worcestershire-majoneesilla/6285614",
+            "Kreikka-burgeri": "https://www.mtvuutiset.fi/makuja/artikkeli/kreikka-burgeri-ja-taydellinen-tzatziki/6512314",
+            "Porsaankylki vietnamilaisittain": "https://www.mtvuutiset.fi/makuja/artikkeli/porsaankylkea-vietnamilaisittain/6807096",
+            "Punaviinissä haudutetut naudan kylkiluut": "https://www.mtvuutiset.fi/makuja/artikkeli/punaviinissa-haudutettu-naudankylki-syvan-maukkaat-ribsit/6878892",
+            "Raakamakkaralla täytetyt grillisipulit": "https://www.mtvuutiset.fi/makuja/artikkeli/taytetyt-sipulit-grossetolaiseen-tapaan/7003258",
+            "Metsäkauris-linssipata rakuunalla": "https://www.mtvuutiset.fi/makuja/artikkeli/riistapata-linsseilla-ja-rakuunalla/7115028",
+            "Punaviinissä haudutettu paisti (hirvi/nauta)": "https://www.mtvuutiset.fi/makuja/artikkeli/punaviinipaisti-italialaisittain-helppo-ja-huumaava/7267834",
+            "Porsaankyljykset sinappisella viinirypälekastikkeella": "https://www.mtvuutiset.fi/makuja/artikkeli/porsaankyljykset-sinappisella-viinirypalekastikkeella/7287030",
+            "Chorizoa ja hummusta – helppoa ja herkullista": "https://www.mtvuutiset.fi/makuja/artikkeli/chorizoa-ja-hummusta-helppoa-ja-herkullista/7439852",
+            "Grillattu porsaanposki ja pluma": "https://www.mtvuutiset.fi/makuja/artikkeli/grillattu-porsaan-poski-ja-pluma-paprikapyreen-ja-yrttivinegretin-kera/6503326",
+            "Karitsaa kahdella tapaa, kyljyksenä ja krokettina maa-artisokkapyreen kera": "https://www.mtvuutiset.fi/makuja/artikkeli/karitsaa-kahdella-tapaa-kyljyksena-ja-krokettina-maa-artisokkapyreen-kera/7659808",
+            "Munakoisolasagne – saattaa aiheuttaa avioliittoja": "https://www.mtvuutiset.fi/makuja/artikkeli/munakoisolasagne-saattaa-aiheuttaa-avioliittoja/6235618",
+            "Moussaka@@2012-03-12": "https://www.mtvuutiset.fi/makuja/artikkeli/mainio-moussaka-savotta/6235564",
+            "Herkkusienilasagne": "https://www.mtvuutiset.fi/makuja/artikkeli/herkkusieni-pinaattilasagne/6234534",
+            "Kantarellilasagne": "https://www.mtvuutiset.fi/makuja/artikkeli/kantarellilasagne-sesongin-helppo-herkku/6535028",
+            "Gnocchit kermaisella gorgonzolakastikkeella": "https://www.mtvuutiset.fi/makuja/artikkeli/gnocchit-kermaisella-gorgonzola-kastikkeella-herkkua-vartissa/7074552",
+            "Moussaka@@2018-10-02": "https://www.mtvuutiset.fi/makuja/artikkeli/moussaka-yllattavan-helppo-ja-pirun-herkkullinen/7095014",
+            "Vodkapasta": "https://www.mtvuutiset.fi/makuja/artikkeli/vodkapasta/7213758",
+            "Tagliatelle al Ragù alla Bolognese": "https://www.mtvuutiset.fi/makuja/artikkeli/se-aito-pasta-bolognese-eikun-tagliatelle-al-ragu-alla-bolognese/7318404",
+            "Thaityylinen nuudeliwokki": "https://www.mtvuutiset.fi/makuja/artikkeli/thaityylinen-nuudeliwokki/7341422",
+            "Avoin lasagne jokiravunpyrstöillä": "https://www.mtvuutiset.fi/makuja/artikkeli/avoin-lasagne-jokiravunpyrstoilla/7582604",
+            "Pastaa linsseillä – jumalattoman hyvä ja syvä talviruoka": "https://www.mtvuutiset.fi/makuja/artikkeli/pastaa-linsseilla-jumalattoman-hyva-ja-syva-talviruoka/7633998",
+            "Helppo chilinen kirsikkatomaattipasta rapsakoilla kapriksilla": "https://www.mtvuutiset.fi/makuja/artikkeli/helppo-chilinen-kirsikkatomaattipasta-rapsakoilla-kapriksilla/7657276",
+            "Voinen lime-salviarisotto": "https://www.mtvuutiset.fi/makuja/artikkeli/voinen-salviarisotto-limella/7242032",
+            "Ankan koipi ja appelsiinirisotto": "https://www.mtvuutiset.fi/makuja/artikkeli/ankankoipea-appelsiinikastikkeessa-appelsiinilla-maustetun-risoton-kera/6235338",
+            "Kantarellirisotto": "https://www.mtvuutiset.fi/makuja/artikkeli/monet-tekevat-yhden-virheen-valmistaessaan-sienirisottoa-ei-todellakaan-kannattaisi/8984974",
+            "Kukkakaali-parsarisotto": "https://www.mtvuutiset.fi/makuja/artikkeli/16-risoton-bloggaus/6235344",
+            "Kurpitsarisotto": "https://www.mtvuutiset.fi/makuja/artikkeli/kurpitsarisotto/6235090",
+            "Paprikainen risotto sardellilla ja buffalomozzarellalla": "",
+            "Enchilada-vuoka": "https://www.mtvuutiset.fi/makuja/artikkeli/enchilada-vuoka-katkaravuilla/7375532",
+            "Kermainen sipulikeitto": "",
+            "Valkoinen parsakeitto": "https://www.mtvuutiset.fi/makuja/artikkeli/valkoinen-parsakeitto-a-la-philips-soupmaker/6235306",
+            "Lohiseljanka": "https://www.mtvuutiset.fi/makuja/artikkeli/lohiseljanka/7626040",
+            "Vuohenjuusto-punajuuritimbaali": "",
+            "Vuohenjuustokohokas": "",
+            "Marokkolainen couscous": "",
+            "Sienisalaatti": "",
+            "Juures-cassoulet Chef Santeria mukaillen": "https://www.mtvuutiset.fi/makuja/artikkeli/juures-cassoulet-chef-santeria-mukaillen/6235198",
+            "Uppopaistetut maa-artisokat sitruunaisella dipillä": "https://www.mtvuutiset.fi/makuja/artikkeli/uppopaistetut-maa-artisokat-sitruunaisella-dipilla/6235378",
+            "Täydelliset ranskalaiset perunat": "https://www.mtvuutiset.fi/makuja/artikkeli/taydelliset-ranskalaiset-perunat/6234548",
+            "Punajuuriburgeri punajuurihummuksella ja piparjuurikermalla": "https://www.mtvuutiset.fi/makuja/artikkeli/punajuuriburgeri-punajuurihummuksella-ja-piparjuurikermalla/6761286",
+            "Selleripiiras": "https://www.mtvuutiset.fi/makuja/artikkeli/selleripiiras-a-la-gastronaatti/6235288",
+            "Uusi frittitaikina / friteeratut kurpitsankukat": "https://www.mtvuutiset.fi/makuja/artikkeli/frittitaikina-kasviksille/6515702",
+            "Punaviinikastike": "https://www.mtvuutiset.fi/makuja/artikkeli/hirven-routapaisti-ja-perunakohokas/6235608",
+            "Tilli-vodka-kermakastike": "https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-osa-9-tilli-vodka-kermakastikkeella/6235140",
+            "Mole-kastike": "https://www.mtvuutiset.fi/makuja/artikkeli/mole-kastike-ja-oluessa-haudutettu-possunposki-taco/6235082",
+            "Tillikastike": "https://www.mtvuutiset.fi/makuja/artikkeli/tilliliha-traumasta-herkuksi/6235056",
+            "BBQ-kastike – versio 1": "https://www.mtvuutiset.fi/makuja/artikkeli/bbq-kastike-kahdella-tapaa/6235106",
+            "BBQ-kastike – versio 2": "https://www.mtvuutiset.fi/makuja/artikkeli/bbq-kastike-kahdella-tapaa/6235106",
+            "Kermainen kantarellikastike": "https://www.mtvuutiset.fi/makuja/artikkeli/kausiruokaa-kurpitsa-gnocchit-ja-kermainen-kantarellikastike/6235174",
+            "Mutti-tomaattikastike – versio 1": "https://www.mtvuutiset.fi/makuja/artikkeli/mutti-kastike-battle/6235250",
+            "Mutti-tomaattikastike – versio 2": "https://www.mtvuutiset.fi/makuja/artikkeli/mutti-kastike-battle/6235250",
+            "Teriyaki-kastike – Gaijin/possunkylkiversio": "https://www.mtvuutiset.fi/makuja/artikkeli/possunkylkea-ja-teriyaki-kastiketta-gaijinin-tapaan/6235284",
+            "Avokadotahna": "",
+            "Harissamajoneesi": "",
+            "Vegaaninen manteliaioli": "https://www.mtvuutiset.fi/makuja/artikkeli/5984/6234780",
+            "Punaviini-tomaattikastike": "https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-possupullat-punaviini-tomaattikastikkeessa/6234826",
+            "Grillatut tomaatti-mozzarella-basilikaleivät": "https://www.mtvuutiset.fi/makuja/artikkeli/grillatut-tomaatti-mozzarella-basilika-leivat/6235646",
+            "Pizzaviikko, osa 3 – mestarin opein": "https://www.mtvuutiset.fi/makuja/artikkeli/pizzaviikko-osa-3-mestarin-opein/6235518",
+            "Briossisämpylät – täydellinen burgerisämpylä": "https://www.mtvuutiset.fi/makuja/artikkeli/briossisampylat-taydellinen-burgerisampyla/7331144",
+            "Dutch Baby": "https://www.mtvuutiset.fi/makuja/artikkeli/dutch-baby-suolainen-pannukakku-paistinpannulla-brunssille-lounaaksi-aamiaiselle/7408994",
+            "Italohodari eli Hot Dog al Ragù alla Bolognese": "https://www.mtvuutiset.fi/makuja/artikkeli/italohodari-eli-hot-dog-al-ragu-alla-bolognese/7463430",
+            "Appelsiini-unikonsiemenjäätelö": "https://www.mtvuutiset.fi/makuja/artikkeli/appelsiini-unikonsiemenjaatelo/6235578"
+          }''')
+
+          SPECIAL={
+            "Tilli-vodka-kermakastike":["Tilli-vodka-kermakastike","Tilli-vodka-kermakastike:"],
+            "Mole-kastike":["Mole-kastike","Mole"],
+            "Tillikastike":["Kastike","Kastike:"],
+            "BBQ-kastike – versio 1":["BBQ-kastike vol. 1","BBQ-kastike vol 1","BBQ-kastike 1"],
+            "BBQ-kastike – versio 2":["BBQ-kastike vol. 2","BBQ-kastike vol 2","BBQ-kastike 2"],
+            "Kermainen kantarellikastike":["Kermainen kantarellikastike","Kantarellikastike"],
+            "Mutti-tomaattikastike – versio 1":["Mutti-kastike 1","Kastike 1","Versio 1"],
+            "Mutti-tomaattikastike – versio 2":["Mutti-kastike 2","Kastike 2","Versio 2"],
+            "Teriyaki-kastike – Gaijin/possunkylkiversio":["Teriyaki-kastike","Teriyaki"],
+            "Avokadotahna":["Avokadotahna"],
+            "Harissamajoneesi":["Harissamajoneesi"],
+            "Vegaaninen manteliaioli":["Manteliaioli","Manteliaioli:"],
+            "Punaviini-tomaattikastike":["Punaviini-tomaattikastike","Punaviini-tomaattikastike:"],
+            "Ginger ale -kastike":["Ginger ale -kastike","Ginger ale -kastike:"],
+            "Punaviinikastike":["Punaviinikastike","Punaviinikastike:"],
+            "Kukkakaali-parsarisotto":["Kukkakaali-parsarisotto","LISÄKSI: Kukkakaali-parsarisotto"]
+          }
+
+          entries=[]
+          for p in sorted(Path('reseptit').glob('data*.js')):
+              m=re.search(r'\.concat\((\[.*\])\);?\s*$',p.read_text(encoding='utf-8'),re.S)
+              entries += json.loads(m.group(1))
+          print('entries',len(entries),flush=True)
+
           local=threading.local()
           def sess():
               if not hasattr(local,'s'):
@@ -88,99 +135,134 @@ jobs:
               return local.s
           def norm(s):
               s=unicodedata.normalize('NFKD',s or '').encode('ascii','ignore').decode().lower();return re.sub(r'\s+',' ',re.sub(r'[^a-z0-9]+',' ',s)).strip()
-          def similarity(a,b):return SequenceMatcher(None,norm(a),norm(b)).ratio()
-          CHILD_RE=re.compile(r'\\"children\\":(?:\[)?\\"((?:\\\\.|[^"\\])*)\\"')
-          UNIT=re.compile(r'(^|\s)(\d+[\d\s/,.–-]*\s*)?(g|kg|mg|ml|cl|dl|l|rkl|tl|kpl|prk|pkt|pss|pala|palaa|nippu|ruukku|oksaa|oksa|kynsi|kynttä|munaa|kananmunaa)(\s|$)',re.I)
-          def strings(src):
+          def sim(a,b):return SequenceMatcher(None,norm(a),norm(b)).ratio()
+          UNIT=re.compile(r'(^|\s)(\d+[\d\s/,.–-]*\s*)?(g|kg|mg|ml|cl|dl|l|rkl|tl|kpl|prk|pkt|pss|pala|palaa|nippu|ruukku|oksaa|oksa|kynsi|kynttä|munaa|kananmunaa|cm|ripaus|hyppysellinen)(\s|$)',re.I)
+          QTY=re.compile(r'^\s*[~≈]?\d+[\d\s/,.–-]*\s*\S+')
+          BANNED_PREFIX=('MTV Oy, All rights reserved','Julkaistu','Jaa artikkeli','Lisää aiheesta','Lue myös','Katso myös','Release number:','MTV LIFESTYLE','Toimitus')
+          BLOG_PREFIX=('PS.','P.S.','Tsekkaa myös','Tsekkaa ')
+          def blocks_from(root):
               out=[]
-              for m in CHILD_RE.finditer(src):
-                  try:v=json.loads('"'+m.group(1)+'"')
-                  except:continue
-                  v=html.unescape(v).strip()
-                  if v and (not out or v!=out[-1]):out.append(v)
+              if not root:return out
+              tags=['p','h2','h3','h4','h5','li']
+              for t in root.find_all(tags):
+                  par=t.parent;nested=False
+                  while par is not None and par is not root:
+                      if getattr(par,'name',None) in tags:nested=True;break
+                      par=par.parent
+                  if nested:continue
+                  text=html.unescape(t.get_text(' ',strip=True));text=re.sub(r'\s+',' ',text).strip();text=text.replace('MTV Oy, All rights reserved','').strip()
+                  if not text:continue
+                  strong=t.find(['strong','b']);strongtxt=re.sub(r'\s+',' ',strong.get_text(' ',strip=True)).strip() if strong else ''
+                  heading=(t.name.startswith('h') or (strongtxt and len(strongtxt)>=max(3,int(len(text)*.72))))
+                  out.append({'text':text,'heading':heading,'tag':t.name})
               return out
-          STOP=('Lisää aiheesta:','Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','MTV Oy, All rights reserved','Release number:','Seuraavaksi','Toimitus')
-          NAV={'Etusivu','Haku','Kirjaudu','Valikko','Lifestyle','Uutiset','Makuja','Reseptit','Ruokauutiset','Videot','Tuoreimmat'}
-          def cluster_score(vals,i):
-              w=vals[i:i+35]; units=sum(bool(UNIT.search(x)) for x in w); long=sum(len(x)>55 for x in w); return units*3+long
-          def extract(src,target):
-              vals=strings(src)
-              if not vals:return []
-              nt=norm(target);cands=[]
-              for i,v in enumerate(vals):
-                  if len(v)>240:continue
-                  nv=norm(v);sc=similarity(v,target)
-                  tok=set(nt.split());tokv=set(nv.split());over=len(tok&tokv)/max(1,len(tok))
-                  if nt in nv or nv in nt or sc>=.55 or over>=.55:cands.append((cluster_score(vals,i),over,sc,i))
-              if cands:
-                  _,_,_,start=max(cands)
-              else:
-                  # Fallback: locate strongest ingredient/prose cluster and walk back to a nearby heading.
-                  starts=[i for i in range(len(vals)) if cluster_score(vals,i)>=8]
-                  if not starts:return []
-                  core=max(starts,key=lambda i:cluster_score(vals,i));start=max(0,core-8)
-                  for j in range(core-1,max(-1,core-20),-1):
-                      if 3<len(vals[j])<170 and vals[j] not in NAV and not vals[j].startswith('$'):
-                          start=j;break
-              out=[]
-              for x in vals[start:]:
-                  if x.startswith('$') or x in {'...','Julkaistu ','Jaa artikkeli'}:continue
-                  if out and any(x.startswith(t) for t in STOP):break
-                  if x in NAV and len(out)>8:break
-                  if x in NAV and not out:continue
-                  out.append(x)
-                  if len(out)>=190:break
-              # Keep enough to include ingredients and preparation; remove obvious repeated heading/title strings only when adjacent.
+          def ingredientish(s):
+              if len(s)>180:return False
+              if UNIT.search(s) or QTY.search(s):return True
+              ns=norm(s)
+              return len(s)<55 and any(x in ns.split() for x in ['suolaa','pippuria','voita','oljya','vetta','basilikaa','persiljaa','timjamia','korianteria'])
+          def methodish(s):
+              if len(s)<45:return False
+              ns=norm(s);verbs=('kuumenna','lisaa','sekoita','paista','keita','hauduta','leikkaa','hienonna','tarjoile','mausta','laita','nosta','kaada','grillaa','vatkaa','sulata','anna','kuori','pilko','soseuta','paahda','valmista','purista','ripottele')
+              return any(v in ns for v in verbs)
+          def future_recipe_score(blocks,i):
+              w=blocks[i+1:i+30];return sum(ingredientish(x['text']) for x in w)*3+sum(methodish(x['text']) for x in w)*2
+          def find_heading(blocks,targets):
+              best=None;nts=[norm(x) for x in targets if x]
+              for i,b in enumerate(blocks):
+                  txt=b['text'];nt=norm(txt)
+                  if not b['heading'] and len(txt)>90:continue
+                  sc=max([sim(txt,t) for t in targets if t] or [0]);exact=max([1 if n and (n in nt or nt in n) else 0 for n in nts] or [0]);fs=future_recipe_score(blocks,i);total=exact*8+sc*5+min(fs,15)
+                  if (exact or sc>=.48) and fs>=3:
+                      cand=(total,-i,i)
+                      if best is None or cand>best:best=cand
+              return best[2] if best else None
+          def first_recipe_heading(blocks):
+              best=None
+              for i,b in enumerate(blocks):
+                  if not b['heading']:continue
+                  fs=future_recipe_score(blocks,i)
+                  if fs>=7 and 2<len(b['text'])<170:
+                      cand=(fs,-i,i)
+                      if best is None or cand>best:best=cand
+              if best:return best[2]
+              for i in range(len(blocks)-2):
+                  if ingredientish(blocks[i]['text']) and (ingredientish(blocks[i+1]['text']) or ingredientish(blocks[i+2]['text'])):
+                      for j in range(i-1,max(-1,i-10),-1):
+                          if blocks[j]['heading'] and len(blocks[j]['text'])<170:return j
+                      return max(0,i-1)
+              return None
+          def is_recipe_heading(blocks,i):return blocks[i]['heading'] and future_recipe_score(blocks,i)>=5
+          def clean_recipe_lines(lines):
               clean=[]
-              for x in out:
-                  if not clean or x!=clean[-1]:clean.append(x)
+              for s in lines:
+                  s=re.sub(r'\s+',' ',s).strip()
+                  if not s:continue
+                  if any(s.startswith(x) for x in BANNED_PREFIX):continue
+                  if any(s.startswith(x) for x in BLOG_PREFIX):continue
+                  if s in {'***','Lähde:','Lähde'}:continue
+                  if clean and s==clean[-1]:continue
+                  clean.append(s)
               return clean
+          def extract_recipe(src,e):
+              soup=BeautifulSoup(src,'lxml');root=soup.select_one('[data-testid="article-text-component"]');blocks=blocks_from(root)
+              page_title=soup.find('h1').get_text(' ',strip=True) if soup.find('h1') else ''
+              if not blocks:return [],'NO_ARTICLE_ROOT',{'page_title':page_title}
+              special=SPECIAL.get(e['name']);targets=special or [e['name']];start=find_heading(blocks,targets)
+              if start is None:start=first_recipe_heading(blocks)
+              if start is None:return [],'NO_RECIPE_START',{'page_title':page_title}
+              end=len(blocks)
+              if special:
+                  for j in range(start+1,len(blocks)):
+                      if is_recipe_heading(blocks,j):end=j;break
+              raw=[b['text'] for b in blocks[start:end]];kept=[]
+              for s in raw:
+                  if any(s.startswith(x) for x in BANNED_PREFIX):break
+                  kept.append(s)
+              lines=clean_recipe_lines(kept)
+              while len(lines)>1 and len(lines[0])>180 and not ingredientish(lines[0]):lines.pop(0)
+              ing=sum(ingredientish(x) for x in lines);met=sum(methodish(x) for x in lines);chars=len('\n'.join(lines));status='OK' if chars>=90 and ing>=1 and met>=1 else 'WEAK_RECIPE'
+              return lines,status,{'page_title':page_title,'ingredients':ing,'methods':met,'chars':chars,'start_text':blocks[start]['text']}
+          def candidate_url(e):
+              if e.get('direct') and '/haku?' not in e.get('href',''):return e.get('href','')
+              key=e['name']+('@@'+e.get('date_raw','') if e['name']=='Moussaka' else '')
+              return RESOLVED.get(key) or RESOLVED.get(e['name']) or ''
           def one(i,e):
-              rinfo=resolved.get(e['name'],{})
-              url=e.get('href','') if e.get('direct') and '/haku?' not in e.get('href','') else rinfo.get('url','')
-              if not url:return i,{**e,'resolved_url':'','resolve_score':rinfo.get('score',0),'extract_status':'UNRESOLVED_URL','recipe_lines':[]}
+              url=candidate_url(e)
+              if not url:return i,{**e,'resolved_url':'','extract_status':'NO_SOURCE','recipe_lines':[],'qa':{}}
               try:
-                  rr=sess().get(url,timeout=30);lines=extract(rr.text,e['name']);chars=len('\n'.join(lines));units=sum(bool(UNIT.search(x)) for x in lines)
-                  # Small sauces/dips may legitimately be short, so accept either substantial text or ingredient evidence + instructions/prose.
-                  status='OK' if (chars>=120 and (units>=1 or len(lines)>=5)) else 'SHORT_EXTRACTION'
-                  return i,{**e,'resolved_url':rr.url,'resolve_score':rinfo.get('score',1 if e.get('direct') else 0),'extract_status':status,'recipe_lines':lines,'unit_lines':units}
-              except Exception as ex:return i,{**e,'resolved_url':url,'resolve_score':rinfo.get('score',0),'extract_status':f'ERROR_{type(ex).__name__}','recipe_lines':[]}
+                  r=sess().get(url,timeout=35,allow_redirects=True);lines,status,meta=extract_recipe(r.text,e);return i,{**e,'resolved_url':r.url,'extract_status':status,'recipe_lines':lines,'qa':meta}
+              except Exception as ex:return i,{**e,'resolved_url':url,'extract_status':'ERROR_'+type(ex).__name__,'recipe_lines':[],'qa':{'error':repr(ex)}}
           results=[None]*len(entries)
-          with ThreadPoolExecutor(max_workers=7) as pool:
-              fs=[pool.submit(one,i,e) for i,e in enumerate(entries)];done=0
+          with ThreadPoolExecutor(max_workers=8) as ex:
+              fs=[ex.submit(one,i,e) for i,e in enumerate(entries)];done=0
               for f in as_completed(fs):
                   i,r=f.result();results[i]=r;done+=1
-                  if done%30==0 or done==len(entries):print('extract',done,'OK',sum(1 for x in results if x and x['extract_status']=='OK'),flush=True)
-          # Export exactly in the site's group order and index order within each group.
+                  if done%40==0 or done==len(entries):print('done',done,'OK',sum(1 for x in results if x and x['extract_status']=='OK'),flush=True)
           by={g:[] for g in GROUPS}
           for r in results:by.setdefault(r.get('group') or 'Muut',[]).append(r)
-          out=['SIVUMAKU – MTV-RESEPTIT 2012–2019','',f'Reseptejä: {len(results)}','Ryhmittely: sama kuin Sivumaku-reseptisivulla','']
+          out=['SIVUMAKU – 324 RESEPTIÄ','','Vain reseptit: ainekset ja valmistusohjeet.','']
           for g in GROUPS:
               items=by.get(g,[])
               if not items:continue
-              out+=['='*80,f'{g.upper()} ({len(items)})','='*80,'']
+              out += ['='*78,g.upper(),'='*78,'']
               for r in items:
-                  out += [r['name']]
-                  meta=' · '.join(x for x in [r.get('date',''),r.get('subgroup','')] if x)
-                  if meta:out.append(meta)
-                  out.append('Lähde: '+(r.get('resolved_url') or r.get('href','')))
-                  out += r['recipe_lines'] if r['recipe_lines'] else [f'[RESEPTITEKSTI PUUTTUU – {r["extract_status"]}]']
-                  out.append('')
-          Path('Sivumaku_324_reseptia_LOPULLINEN.txt').write_text('\n'.join(out),encoding='utf-8')
-          Path('Sivumaku_324_reseptia_LOPULLINEN.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
-          report=['name\tgroup\tdirect\tresolve_score\tresolved_url\tstatus\tchars\tunit_lines']
+                  out.append(r['name']);out.append('-'*len(r['name']));out.extend(r['recipe_lines'] if r['recipe_lines'] else ['[RESEPTI PUUTTUU]']);out.append('')
+          txt='\n'.join(out);Path('Sivumaku_324_VAIN_RESEPTIT.txt').write_text(txt,encoding='utf-8');Path('Sivumaku_324_VAIN_RESEPTIT.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+          report=['name\tgroup\tdate\turl\tstatus\tpage_title\tstart\tingredients\tmethods\tchars']
           for r in results:
-              vals=[r['name'],r.get('group',''),str(r.get('direct')),str(r.get('resolve_score','')),r.get('resolved_url',''),r['extract_status'],str(len('\n'.join(r['recipe_lines']))),str(r.get('unit_lines',''))]
-              report.append('\t'.join(v.replace('\t',' ') for v in vals))
-          Path('Sivumaku_324_laatutarkistus.tsv').write_text('\n'.join(report),encoding='utf-8')
-          print('FINAL STATUS', {s:sum(r['extract_status']==s for r in results) for s in sorted(set(r['extract_status'] for r in results))})
-          print('LOW RESOLVE',sum(1 for r in results if not r.get('direct') and r.get('resolve_score',0)<.45))
+              q=r.get('qa',{});vals=[r['name'],r.get('group',''),r.get('date',''),r.get('resolved_url',''),r['extract_status'],q.get('page_title',''),q.get('start_text',''),str(q.get('ingredients','')),str(q.get('methods','')),str(q.get('chars',''))];report.append('\t'.join(str(v).replace('\t',' ') for v in vals))
+          Path('Sivumaku_324_RESEPTI_QA.tsv').write_text('\n'.join(report),encoding='utf-8')
+          statuses={s:sum(r['extract_status']==s for r in results) for s in sorted(set(r['extract_status'] for r in results))};print('FINAL',statuses,flush=True)
+          bad=[r for r in results if r['extract_status']!='OK'];print('BAD COUNT',len(bad),flush=True)
+          for r in bad:print('BAD |',r['name'],'|',r.get('date'),'|',r.get('resolved_url'),'|',r['extract_status'],'|',r.get('qa',{}),flush=True)
+          for b in ['Julkaistu','MTV Oy, All rights reserved','Lisää aiheesta','Release number:','Jaa artikkeli','MTV LIFESTYLE','https://www.mtvuutiset.fi']:
+              print('BANNED',b,'=',txt.count(b),flush=True)
       - uses: actions/upload-artifact@v4
         with:
-          name: sivumaku-324-lopullinen
+          name: sivumaku-324-vain-reseptit
           path: |
-            Sivumaku_324_reseptia_LOPULLINEN.txt
-            Sivumaku_324_reseptia_LOPULLINEN.json
-            Sivumaku_324_laatutarkistus.tsv
-            resolved_urls.json
+            Sivumaku_324_VAIN_RESEPTIT.txt
+            Sivumaku_324_VAIN_RESEPTIT.json
+            Sivumaku_324_RESEPTI_QA.tsv
           retention-days: 1
