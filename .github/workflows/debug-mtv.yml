@@ -1,4 +1,4 @@
-name: Inspect dated Sivumaku searches
+name: Scan migrated Sivumaku IDs
 on:
   push:
     branches: [main]
@@ -9,62 +9,42 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-node@v4
-        with: {node-version: '22'}
-      - run: npm init -y && npm install playwright
-      - run: npx playwright install chromium
-      - shell: bash
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install requests beautifulsoup4 lxml
+      - shell: python
         run: |
-          cat > search.mjs <<'JS'
-          import { chromium } from 'playwright';
-          import fs from 'fs';
-          const qs=[
-            ['Parmesaanikana','02.04.2012'],
-            ['Rapea kanaleike minttuisella hernepyreellä','08.04.2018'],
-            ['Raakamakkaralla täytetyt grillisipulit','26.07.2018'],
-            ['Metsäkauris-linssipata rakuunalla','18.10.2018'],
-            ['Moussaka','12.03.2012'],
-            ['Moussaka','02.10.2018'],
-            ['Vodkapasta','03.01.2019'],
-            ['Thaityylinen nuudeliwokki','04.04.2019'],
-            ['Ankan koipi appelsiinirisotto',''],
-            ['Kukkakaali-parsarisotto',''],
-            ['Paprikainen risotto sardellilla buffalomozzarellalla','2019'],
-            ['Kermainen sipulikeitto','01.03.2012'],
-            ['Vuohenjuusto-punajuuritimbaali','09.02.2012'],
-            ['Vuohenjuustokohokas','09.02.2012'],
-            ['Marokkolainen couscous','16.02.2012'],
-            ['Sienisalaatti','01.03.2012'],
-            ['Punaviinikastike','02.02.2012'],
-            ['Tillikastike','15.04.2013'],
-            ['Harissamajoneesi','14.01.2015'],
-            ['Vegaaninen manteliaioli','17.01.2016']
-          ];
-          const browser=await chromium.launch({headless:true});
-          const page=await browser.newPage();
-          let out=[];
-          for(const [title,date] of qs){
-            const queries=[`${title} ${date}`.trim(), title];
-            let all=[];
-            for(const q of queries){
-              try{
-                await page.goto('https://www.mtvuutiset.fi/haku?q='+encodeURIComponent(q),{waitUntil:'domcontentloaded',timeout:45000});
-                await page.waitForTimeout(3000);
-                const links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||a.getAttribute('aria-label')||'').trim(),href:a.href})).filter(x=>x.href.includes('mtvuutiset.fi/makuja/artikkeli/')||x.href.includes('mtvuutiset.fi/makuja/reseptit/resepti/')));
-                for(const x of links) all.push({...x,query:q});
-              }catch(e){all.push({error:String(e),query:q});}
-            }
-            const uniq=[]; const seen=new Set();
-            for(const x of all){if(x.href&&!seen.has(x.href)){seen.add(x.href);uniq.push(x)}}
-            out.push({title,date,results:uniq.slice(0,20)});
-            console.log('\n###',title,date); for(const x of uniq.slice(0,20)) console.log(x.text,'|',x.href,'| via',x.query);
-          }
-          await browser.close();
-          fs.writeFileSync('dated-searches.json',JSON.stringify(out,null,2));
-          JS
-          node search.mjs
+          import requests,re,json
+          from bs4 import BeautifulSoup
+          from concurrent.futures import ThreadPoolExecutor,as_completed
+          ids=list(range(6235480,6235661,2))
+          s=requests.Session();s.headers.update({'User-Agent':'Mozilla/5.0'})
+          def one(i):
+              u=f'https://www.mtvuutiset.fi/makuja/artikkeli/x/{i}'
+              try:
+                  r=s.get(u,timeout=20,allow_redirects=True)
+                  if r.status_code!=200 or str(i) not in r.url:return None
+                  soup=BeautifulSoup(r.text,'lxml')
+                  h=soup.find('h1'); title=h.get_text(' ',strip=True) if h else ''
+                  root=soup.select_one('[data-testid="article-text-component"]')
+                  body=root.get_text(' ',strip=True)[:500] if root else ''
+                  # find publication date in rendered text/metadata
+                  txt=soup.get_text(' ',strip=True)
+                  m=re.search(r'Julkaistu\s+(\d{1,2}\.\d{1,2}\.\d{4})',txt)
+                  date=m.group(1) if m else ''
+                  return {'id':i,'url':r.url,'title':title,'date':date,'body':body}
+              except Exception as e:return {'id':i,'error':repr(e)}
+          out=[]
+          with ThreadPoolExecutor(max_workers=16) as ex:
+              fs=[ex.submit(one,i) for i in ids]
+              for f in as_completed(fs):
+                  x=f.result()
+                  if x and x.get('title'):out.append(x)
+          out.sort(key=lambda x:x['id'])
+          for x in out:print(x['id'],'|',x['date'],'|',x['title'],'|',x['url'])
+          open('id-scan.json','w',encoding='utf-8').write(json.dumps(out,ensure_ascii=False,indent=2))
       - uses: actions/upload-artifact@v4
         with:
-          name: dated-sivumaku-searches
-          path: dated-searches.json
+          name: sivumaku-id-scan
+          path: id-scan.json
           retention-days: 1
