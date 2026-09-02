@@ -1,0 +1,228 @@
+name: Export Sivumaku recipes
+
+on:
+  push:
+    branches: [chatgpt-recipe-export]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install scraper dependencies
+        run: pip install requests beautifulsoup4 lxml
+      - name: Export recipes
+        shell: python
+        run: |
+          import json, re, html, time, unicodedata
+          from pathlib import Path
+          from urllib.parse import urlparse, parse_qs, quote_plus, unquote
+          import requests
+          from bs4 import BeautifulSoup
+          from difflib import SequenceMatcher
+
+          ROOT = Path('.')
+          GROUPS=["Lihapullat", "Kana", "Kala & äyriäiset", "Liha", "Pasta & lasagne", "Risotto & riisi", "Texmex & meksikolainen", "Keitot", "Kasvis & lisukkeet", "Kastikkeet & tahnat", "Pizza & leivät", "Jälkiruoat & makeat", "Muut"]
+          sess=requests.Session()
+          sess.headers.update({'User-Agent':'Mozilla/5.0 (compatible; SivumakuRecipeArchive/1.0; +https://sivumaku.fi)'})
+
+          entries=[]
+          for p in sorted((ROOT/'reseptit').glob('data*.js')):
+              s=p.read_text(encoding='utf-8')
+              m=re.search(r'\.concat\((\[.*\])\);?\s*$', s, re.S)
+              if not m:
+                  raise RuntimeError(f'Could not parse {p}')
+              entries.extend(json.loads(m.group(1)))
+          print('Loaded entries:', len(entries))
+
+          def norm(s):
+              s=unicodedata.normalize('NFKD', s or '').encode('ascii','ignore').decode().lower()
+              s=re.sub(r'[^a-z0-9]+',' ',s)
+              return re.sub(r'\s+',' ',s).strip()
+
+          def similarity(a,b):
+              return SequenceMatcher(None,norm(a),norm(b)).ratio()
+
+          def clean_url(u):
+              if not u: return ''
+              if u.startswith('//'): u='https:'+u
+              if 'duckduckgo.com/l/?' in u:
+                  q=parse_qs(urlparse(u).query)
+                  if q.get('uddg'): u=unquote(q['uddg'][0])
+              return u.split('#')[0]
+
+          def mtv_candidates_from_html(text, title):
+              soup=BeautifulSoup(text,'lxml')
+              out=[]
+              for a in soup.find_all('a', href=True):
+                  href=clean_url(a['href'])
+                  if href.startswith('/'):
+                      href='https://www.mtvuutiset.fi'+href
+                  if 'mtvuutiset.fi/' not in href: continue
+                  if '/makuja/' not in href and '/artikkeli/' not in href and '/sivumaku/' not in href: continue
+                  label=' '.join(a.stripped_strings)
+                  score=similarity(label,title)
+                  if '/haku?' in href: continue
+                  out.append((score,href,label))
+              seen=set(); uniq=[]
+              for x in sorted(out,reverse=True):
+                  if x[1] not in seen:
+                      seen.add(x[1]); uniq.append(x)
+              return uniq
+
+          def resolve_search(entry):
+              title=entry['name']
+              # 1) MTV's own search page
+              urls=[entry.get('href','')]
+              q=quote_plus(title)
+              urls += [f'https://www.mtvuutiset.fi/haku?q={q}',
+                       f'https://html.duckduckgo.com/html/?q={quote_plus("site:mtvuutiset.fi/makuja "+title)}']
+              for u in urls:
+                  try:
+                      r=sess.get(u,timeout=25)
+                      if r.status_code!=200: continue
+                      cands=mtv_candidates_from_html(r.text,title)
+                      if cands:
+                          # Prefer a plausible title match; otherwise first MTV article candidate.
+                          good=[c for c in cands if c[0] >= .34]
+                          return (good or cands)[0][1]
+                  except Exception as e:
+                      print('resolve error',title,u,e)
+              return ''
+
+          STOP_PREFIXES=('Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','Seuraa meitä','Jaa artikkeli','Sivumaku |','MTV Uutiset')
+          UNIT_RE=re.compile(r'(^|\s)(\d+[\d\s/,.–-]*\s*)?(g|kg|mg|ml|cl|dl|l|rkl|tl|kpl|prk|pkt|pss|pala|palaa|nippu|ruukku|oksaa|oksa|kynsi|kynttä|sipuli|munaa|kananmuna|suolaa|pippuria)(\s|$)',re.I)
+
+          def extract_main_lines(text):
+              soup=BeautifulSoup(text,'lxml')
+              for tag in soup(['script','style','noscript','svg','header','footer','nav','aside']): tag.decompose()
+              root=soup.find('article') or soup.find('main') or soup.body or soup
+              lines=[]
+              for raw in root.get_text('\n',strip=True).splitlines():
+                  x=html.unescape(re.sub(r'\s+',' ',raw)).strip()
+                  if not x: continue
+                  if lines and x==lines[-1]: continue
+                  lines.append(x)
+              return lines
+
+          def extract_recipe(lines,title):
+              if not lines: return []
+              nt=norm(title)
+              # Find a repeated recipe heading after the H1/title area.
+              best=None
+              for i,x in enumerate(lines):
+                  if i<2: continue
+                  nx=norm(x)
+                  if not nx: continue
+                  score=SequenceMatcher(None,nx,nt).ratio()
+                  if (nt in nx or nx in nt or score>.72) and len(x)<180:
+                      best=i
+              start=best
+              if start is None:
+                  # Fallback: first convincing ingredient line after publication metadata/intro.
+                  for i,x in enumerate(lines):
+                      if UNIT_RE.search(x) and i>2:
+                          start=max(0,i-2); break
+              if start is None:
+                  # Keep main article text as last resort, but trim site chrome.
+                  start=0
+              chunk=[]
+              for x in lines[start:]:
+                  if chunk and any(x.startswith(p) for p in STOP_PREFIXES): break
+                  if x in {'Makuja','Lifestyle','Ruoka','Reseptit','Mikko kokkaa'} and len(chunk)>5: break
+                  chunk.append(x)
+                  if len(chunk)>=180: break
+              # Trim trailing topic/tag soup.
+              while chunk and (len(chunk[-1])<80 and re.fullmatch(r'[A-Za-zÅÄÖåäö0-9 &+\-–|]+',chunk[-1]) and not UNIT_RE.search(chunk[-1]) and len(chunk)>8):
+                  if chunk[-1].lower() in {'sivumaku','makuja','ruoka','resepti','reseptit'}:
+                      chunk.pop()
+                  else: break
+              return chunk
+
+          def get_recipe(entry):
+              url=entry.get('href','') if entry.get('direct') else ''
+              if not url or '/haku?' in url:
+                  url=resolve_search(entry)
+              if not url:
+                  return '',[], 'UNRESOLVED_URL'
+              try:
+                  r=sess.get(url,timeout=30)
+                  if r.status_code!=200:
+                      return url,[],f'HTTP_{r.status_code}'
+                  final=r.url
+                  lines=extract_main_lines(r.text)
+                  recipe=extract_recipe(lines,entry['name'])
+                  if len(' '.join(recipe))<80:
+                      return final,recipe,'SHORT_EXTRACTION'
+                  return final,recipe,'OK'
+              except Exception as e:
+                  return url,[],f'ERROR_{type(e).__name__}'
+
+          results=[]
+          for i,e in enumerate(entries,1):
+              url,lines,status=get_recipe(e)
+              results.append({**e,'resolved_url':url,'extract_status':status,'recipe_lines':lines})
+              print(f'[{i}/{len(entries)}] {status:18} {e["name"]} -> {url}')
+              time.sleep(.15)
+
+          # Retry unresolved/short extractions via DuckDuckGo search result candidate once.
+          for r in results:
+              if r['extract_status']=='OK': continue
+              candidate=resolve_search(r)
+              if not candidate or candidate==r.get('resolved_url'): continue
+              try:
+                  rr=sess.get(candidate,timeout=30)
+                  if rr.status_code==200:
+                      lines=extract_recipe(extract_main_lines(rr.text),r['name'])
+                      if len(' '.join(lines))>=80:
+                          r['resolved_url']=rr.url; r['recipe_lines']=lines; r['extract_status']='OK_RETRY'
+              except Exception: pass
+
+          by_group={g:[] for g in GROUPS}
+          for r in results:
+              by_group.setdefault(r.get('group') or 'Muut',[]).append(r)
+
+          out=[]
+          out += ['SIVUMAKU – MTV-RESEPTIT 2012–2019','',f'Reseptejä indeksissä: {len(results)}','Ryhmittely: sama kuin Sivumaku-reseptisivulla','']
+          for g in GROUPS:
+              items=by_group.get(g,[])
+              if not items: continue
+              out += ['='*80, f'{g.upper()} ({len(items)})', '='*80, '']
+              for r in items:
+                  out.append(r['name'])
+                  meta=[]
+                  if r.get('date'): meta.append(r['date'])
+                  if r.get('subgroup'): meta.append(r['subgroup'])
+                  if meta: out.append(' · '.join(meta))
+                  out.append('Lähde: '+(r.get('resolved_url') or r.get('href','')))
+                  if r['recipe_lines']:
+                      out.extend(r['recipe_lines'])
+                  else:
+                      out.append(f'[RESEPTITEKSTIÄ EI SAATU AUTOMAATTISESTI – {r["extract_status"]}]')
+                  out.append('')
+          Path('Sivumaku_324_reseptia.txt').write_text('\n'.join(out),encoding='utf-8')
+          Path('Sivumaku_324_reseptia.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+          report=['name\tgroup\tdate\toriginal_url\tresolved_url\tstatus\tchars']
+          for r in results:
+              vals=[r['name'],r.get('group',''),r.get('date',''),r.get('href',''),r.get('resolved_url',''),r['extract_status'],str(len('\n'.join(r['recipe_lines'])))]
+              report.append('\t'.join(v.replace('\t',' ') for v in vals))
+          Path('Sivumaku_324_keruuraportti.tsv').write_text('\n'.join(report),encoding='utf-8')
+          ok=sum(r['extract_status'].startswith('OK') for r in results)
+          print('SUCCESSFUL EXTRACTIONS',ok,'/',len(results))
+      - name: Upload export
+        uses: actions/upload-artifact@v4
+        with:
+          name: sivumaku-324-reseptia
+          path: |
+            Sivumaku_324_reseptia.txt
+            Sivumaku_324_reseptia.json
+            Sivumaku_324_keruuraportti.tsv
+          retention-days: 1
