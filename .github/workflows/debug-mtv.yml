@@ -1,4 +1,4 @@
-name: Inspect MTV recipe search
+name: Inspect missing Sivumaku archive
 on:
   push:
     branches: [main]
@@ -9,31 +9,48 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-node@v4
-        with: {node-version: '22'}
-      - run: npm init -y && npm install playwright
-      - run: npx playwright install --with-deps chromium
-      - shell: bash
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install requests
+      - shell: python
         run: |
-          cat > search.mjs <<'JS'
-          import { chromium } from 'playwright';
-          const browser=await chromium.launch({headless:true});
-          const page=await browser.newPage();
-          const q='Papas Rellenas';
-          const u='https://www.mtvuutiset.fi/haku?q='+encodeURIComponent(q);
-          await page.goto(u,{waitUntil:'domcontentloaded',timeout:60000});
-          await page.waitForTimeout(7000);
-          const links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||'').trim(),href:a.href})).filter(x=>x.href.includes('mtvuutiset.fi')));
-          console.log(JSON.stringify(links,null,2));
-          await page.screenshot({path:'search.png',fullPage:true});
-          await browser.close();
-          JS
-          node search.mjs > search-links.json
-          cat search-links.json
+          import requests,json,re
+          dates=['2012/02/09','2012/02/16','2012/03/01','2012/04/02']
+          out={}
+          s=requests.Session();s.headers.update({'User-Agent':'Mozilla/5.0'})
+          for d in dates:
+              u='https://web.archive.org/cdx/search/cdx'
+              params={'url':f'blogit.mtv.fi/sivumaku/{d}/*','output':'json','filter':'statuscode:200','fl':'timestamp,original,digest','collapse':'urlkey'}
+              try:
+                  r=s.get(u,params=params,timeout=30)
+                  print('CDX',d,r.status_code,r.url,'len',len(r.text));print(r.text[:8000])
+                  out[d]={'status':r.status_code,'text':r.text}
+              except Exception as e:
+                  out[d]={'error':repr(e)}
+          # also inspect known/guessed old URLs and redirects
+          guesses=[
+          'https://blogit.mtv.fi/sivumaku/2012/04/02/omat-suosikit-parmesankana/',
+          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuusto-punajuuritimbaali/',
+          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuustokohokas/',
+          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuustoa-kahdella-tapaa/',
+          'https://blogit.mtv.fi/sivumaku/2012/02/09/vuohenjuusto-punajuuritimbaali-ja-vuohenjuustokohokas/',
+          'https://blogit.mtv.fi/sivumaku/2012/02/16/marokkolainen-couscous/',
+          'https://blogit.mtv.fi/sivumaku/2012/03/01/kermainen-sipulikeitto/',
+          'https://blogit.mtv.fi/sivumaku/2012/03/01/sienisalaatti/',
+          'https://blogit.mtv.fi/sivumaku/2012/03/01/kermainen-sipulikeitto-ja-sienisalaatti/',
+          'https://blogit.mtv.fi/sivumaku/2012/03/01/sienisalaatti-ja-kermainen-sipulikeitto/'
+          ]
+          checks=[]
+          for u in guesses:
+              try:
+                  r=s.get(u,allow_redirects=False,timeout=20)
+                  checks.append({'url':u,'status':r.status_code,'location':r.headers.get('location'),'len':len(r.text),'title':re.search(r'<title[^>]*>(.*?)</title>',r.text,re.I|re.S).group(1) if re.search(r'<title[^>]*>(.*?)</title>',r.text,re.I|re.S) else ''})
+              except Exception as e:checks.append({'url':u,'error':repr(e)})
+          out['checks']=checks
+          open('archive-debug.json','w',encoding='utf-8').write(json.dumps(out,ensure_ascii=False,indent=2))
+          print(json.dumps(checks,ensure_ascii=False,indent=2))
       - uses: actions/upload-artifact@v4
         with:
-          name: mtv-search-debug
-          path: |
-            search-links.json
-            search.png
+          name: missing-sivumaku-archive
+          path: archive-debug.json
           retention-days: 1
