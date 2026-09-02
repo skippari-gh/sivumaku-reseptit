@@ -11,140 +11,176 @@ permissions:
 jobs:
   export:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - run: pip install requests
-      - name: Export recipes
+      - run: npm init -y && npm install playwright
+      - run: npx playwright install chromium
+      - name: Build index JSON
+        shell: python
+        run: |
+          import json,re
+          from pathlib import Path
+          items=[]
+          for p in sorted(Path('reseptit').glob('data*.js')):
+              m=re.search(r'\.concat\((\[.*\])\);?\s*$',p.read_text(encoding='utf-8'),re.S)
+              items += json.loads(m.group(1))
+          Path('all_entries.json').write_text(json.dumps(items,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('entries',len(items))
+      - name: Resolve search-only recipe URLs with rendered MTV search
+        shell: bash
+        run: |
+          cat > resolve.mjs <<'JS'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+          const entries=JSON.parse(fs.readFileSync('all_entries.json','utf8'));
+          const missing=entries.filter(e=>!e.direct || (e.href||'').includes('/haku?'));
+          const overrides={
+            'Tilli-vodka-kermakastike':'https://www.mtvuutiset.fi/makuja/artikkeli/lihapullat-osa-9-tilli-vodka-kermakastikkeella/6235140',
+            'BBQ-kastike – versio 1':'https://www.mtvuutiset.fi/makuja/artikkeli/bbq-kastike-kahdella-tapaa/6235106',
+            'BBQ-kastike – versio 2':'https://www.mtvuutiset.fi/makuja/artikkeli/bbq-kastike-kahdella-tapaa/6235106',
+            'Teriyaki-kastike – Gaijin/possunkylkiversio':'https://www.mtvuutiset.fi/makuja/artikkeli/possunkylkea-ja-teriyaki-kastiketta-gaijinin-tapaan/6235284',
+            'Pizzaviikko, osa 3 – mestarin opein':'https://www.mtvuutiset.fi/makuja/artikkeli/pizzaviikko-osa-3-mestarin-opein/6235518',
+            'Uppopaistetut maa-artisokat sitruunaisella dipillä':'https://www.mtvuutiset.fi/makuja/artikkeli/uppopaistetut-maa-artisokat-sitruunaisella-dipilla/6235378',
+            'Porsaankyljykset sinappisella viinirypälekastikkeella':'https://www.mtvuutiset.fi/makuja/artikkeli/porsaankyljykset-sinappisella-viinirypalekastikkeella/7287030',
+            'Chorizoa ja hummusta – helppoa ja herkullista':'https://www.mtvuutiset.fi/makuja/artikkeli/chorizoa-ja-hummusta-helppoa-ja-herkullista/7439852',
+            'Pastaa linsseillä – jumalattoman hyvä ja syvä talviruoka':'https://www.mtvuutiset.fi/makuja/artikkeli/pastaa-linsseilla-jumalattoman-hyva-ja-syva-talviruoka/7633998'
+          };
+          function norm(s){return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9åäö]+/g,' ').replace(/\s+/g,' ').trim();}
+          const stop=new Set(['ja','tai','osa','versio','helppo','herkullinen','aito','resepti','se','tavoin','tapaan','kera','kanssa','vol']);
+          function toks(s){return norm(s).split(' ').filter(x=>x.length>1&&!stop.has(x));}
+          function dice(a,b){const A=toks(a),B=toks(b);if(!A.length||!B.length)return 0;let hit=0;const used=new Set();for(const x of A){let j=B.findIndex((y,i)=>!used.has(i)&&(x===y||x.startsWith(y)||y.startsWith(x)));if(j>=0){hit++;used.add(j);}}return 2*hit/(A.length+B.length);}
+          function score(target,link){const text=link.text||'';const path=decodeURIComponent(new URL(link.href).pathname).replace(/[-_/]/g,' ');let s=Math.max(dice(target,text),dice(target,path));const nt=norm(target),nx=norm(text);if(nx.includes(nt)||nt.includes(nx))s=Math.max(s,.94);if(link.href.includes('/makuja/artikkeli/')||link.href.includes('/makuja/sivumaku/blogi/'))s+=.06;if(link.href.includes('/makuja/reseptit/resepti/'))s+=.015;return s;}
+          const browser=await chromium.launch({headless:true});
+          let cursor=0;const resolved=[];
+          async function worker(id){const page=await browser.newPage();while(true){const i=cursor++;if(i>=missing.length)break;const e=missing[i];if(overrides[e.name]){resolved.push({name:e.name,url:overrides[e.name],score:1,via:'override'});console.log(`[${i+1}/${missing.length}] override ${e.name}`);continue;}let links=[];try{await page.goto('https://www.mtvuutiset.fi/haku?q='+encodeURIComponent(e.name),{waitUntil:'domcontentloaded',timeout:45000});await page.waitForTimeout(3200);links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||a.getAttribute('aria-label')||'').trim(),href:a.href})).filter(x=>/mtvuutiset\.fi\/(makuja\/)?(artikkeli|makuja\/sivumaku\/blogi|makuja\/reseptit\/resepti)/.test(x.href)));}catch(err){console.log('search error',e.name,String(err));}
+              const uniq=[...new Map(links.map(x=>[x.href,x])).values()];const ranked=uniq.map(x=>({...x,score:score(e.name,x)})).sort((a,b)=>b.score-a.score);const best=ranked[0];resolved.push({name:e.name,url:best?.href||'',score:best?.score||0,text:best?.text||'',alternatives:ranked.slice(0,5),via:'mtv-search'});console.log(`[${i+1}/${missing.length}] ${(best?.score||0).toFixed(2)} ${e.name} -> ${best?.href||'NONE'}`);}
+            await page.close();}
+          await Promise.all(Array.from({length:4},(_,i)=>worker(i)));
+          await browser.close();
+          resolved.sort((a,b)=>missing.findIndex(x=>x.name===a.name)-missing.findIndex(x=>x.name===b.name));
+          fs.writeFileSync('resolved_urls.json',JSON.stringify(resolved,null,2));
+          console.log('resolved',resolved.filter(x=>x.url).length,'/',missing.length,'low confidence',resolved.filter(x=>x.score<.45).length);
+          JS
+          node resolve.mjs
+      - name: Fetch and extract all recipe text
         shell: python
         run: |
           import json,re,html,unicodedata,threading
           from pathlib import Path
-          from urllib.parse import quote_plus,urlparse,unquote
           from difflib import SequenceMatcher
           from concurrent.futures import ThreadPoolExecutor,as_completed
           import requests
           GROUPS=["Lihapullat","Kana","Kala & äyriäiset","Liha","Pasta & lasagne","Risotto & riisi","Texmex & meksikolainen","Keitot","Kasvis & lisukkeet","Kastikkeet & tahnat","Pizza & leivät","Jälkiruoat & makeat","Muut"]
-          entries=[]
-          for p in sorted(Path('reseptit').glob('data*.js')):
-              m=re.search(r'\.concat\((\[.*\])\);?\s*$',p.read_text(encoding='utf-8'),re.S); entries+=json.loads(m.group(1))
-          print('Loaded',len(entries),flush=True)
+          entries=json.loads(Path('all_entries.json').read_text(encoding='utf-8'))
+          resolved={x['name']:x for x in json.loads(Path('resolved_urls.json').read_text(encoding='utf-8'))}
           local=threading.local()
           def sess():
               if not hasattr(local,'s'):
-                  local.s=requests.Session(); local.s.headers.update({'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/152 Safari/537.36'})
+                  local.s=requests.Session();local.s.headers.update({'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/152 Safari/537.36'})
               return local.s
           def norm(s):
-              s=unicodedata.normalize('NFKD',s or '').encode('ascii','ignore').decode().lower(); return re.sub(r'\s+',' ',re.sub(r'[^a-z0-9]+',' ',s)).strip()
-          def score(a,b): return SequenceMatcher(None,norm(a),norm(b)).ratio()
+              s=unicodedata.normalize('NFKD',s or '').encode('ascii','ignore').decode().lower();return re.sub(r'\s+',' ',re.sub(r'[^a-z0-9]+',' ',s)).strip()
+          def similarity(a,b):return SequenceMatcher(None,norm(a),norm(b)).ratio()
           CHILD_RE=re.compile(r'\\"children\\":(?:\[)?\\"((?:\\\\.|[^"\\])*)\\"')
-          def strings_from_html(src):
-              vals=[]
+          UNIT=re.compile(r'(^|\s)(\d+[\d\s/,.–-]*\s*)?(g|kg|mg|ml|cl|dl|l|rkl|tl|kpl|prk|pkt|pss|pala|palaa|nippu|ruukku|oksaa|oksa|kynsi|kynttä|munaa|kananmunaa)(\s|$)',re.I)
+          def strings(src):
+              out=[]
               for m in CHILD_RE.finditer(src):
                   try:v=json.loads('"'+m.group(1)+'"')
                   except:continue
                   v=html.unescape(v).strip()
-                  if v: vals.append(v)
-              return vals
-          def extract_article(src,title):
-              vals=strings_from_html(src); nt=norm(title)
-              # Choose the first article H1-like title occurrence after site navigation; it is followed by article body strings.
-              cand=[]
+                  if v and (not out or v!=out[-1]):out.append(v)
+              return out
+          STOP=('Lisää aiheesta:','Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','MTV Oy, All rights reserved','Release number:','Seuraavaksi','Toimitus')
+          NAV={'Etusivu','Haku','Kirjaudu','Valikko','Lifestyle','Uutiset','Makuja','Reseptit','Ruokauutiset','Videot','Tuoreimmat'}
+          def cluster_score(vals,i):
+              w=vals[i:i+35]; units=sum(bool(UNIT.search(x)) for x in w); long=sum(len(x)>55 for x in w); return units*3+long
+          def extract(src,target):
+              vals=strings(src)
+              if not vals:return []
+              nt=norm(target);cands=[]
               for i,v in enumerate(vals):
-                  nv=norm(v)
-                  if len(v)<220 and nv:
-                      sc=score(v,title)
-                      if nt in nv or nv in nt or sc>=.70: cand.append((i,sc,v))
-              if not cand:return []
-              # Prefer a title match that has long prose/ingredient-like content soon after it.
-              def quality(c):
-                  i,sc,_=c; window=vals[i+1:i+35]
-                  useful=sum(1 for x in window if len(x)>20 and not x.startswith('$'))
-                  return (useful,sc,-i)
-              start=max(cand,key=quality)[0]
-              out=[]; started=False
-              STOP=('Lisää aiheesta:','Lisää aiheesta','Lue myös','Katso myös','Suosittelemme','Aiheeseen liittyvää','MTV Oy, All rights reserved','Release number:','Lifestyle','Uutiset')
+                  if len(v)>240:continue
+                  nv=norm(v);sc=similarity(v,target)
+                  tok=set(nt.split());tokv=set(nv.split());over=len(tok&tokv)/max(1,len(tok))
+                  if nt in nv or nv in nt or sc>=.55 or over>=.55:cands.append((cluster_score(vals,i),over,sc,i))
+              if cands:
+                  _,_,_,start=max(cands)
+              else:
+                  # Fallback: locate strongest ingredient/prose cluster and walk back to a nearby heading.
+                  starts=[i for i in range(len(vals)) if cluster_score(vals,i)>=8]
+                  if not starts:return []
+                  core=max(starts,key=lambda i:cluster_score(vals,i));start=max(0,core-8)
+                  for j in range(core-1,max(-1,core-20),-1):
+                      if 3<len(vals[j])<170 and vals[j] not in NAV and not vals[j].startswith('$'):
+                          start=j;break
+              out=[]
               for x in vals[start:]:
                   if x.startswith('$') or x in {'...','Julkaistu ','Jaa artikkeli'}:continue
                   if out and any(x.startswith(t) for t in STOP):break
-                  if x==title and out:continue
-                  # skip obvious site chrome after body starts
-                  if x in {'Etusivu','Haku','Kirjaudu','Valikko'}:continue
-                  out.append(x); started=True
-                  if len(out)>=180:break
-              # De-duplicate accidental repeated adjacent strings.
+                  if x in NAV and len(out)>8:break
+                  if x in NAV and not out:continue
+                  out.append(x)
+                  if len(out)>=190:break
+              # Keep enough to include ingredients and preparation; remove obvious repeated heading/title strings only when adjacent.
               clean=[]
               for x in out:
                   if not clean or x!=clean[-1]:clean.append(x)
               return clean
-          URL_RE=re.compile(r'(?:https?:\\?/\\?/www\.mtvuutiset\.fi)?\\?/makuja/(?:artikkeli|sivumaku/blogi)/[^"\\<> ]+/\d{6,8}')
-          def decode_url(u):
-              u=u.replace('\\/','/').replace('\\u0026','&')
-              if u.startswith('/'):u='https://www.mtvuutiset.fi'+u
-              return u
-          def resolve_search(e):
-              title=e['name']; q=quote_plus(title)
-              pages=[e.get('href',''),f'https://www.mtvuutiset.fi/haku?q={q}',f'https://www.google.com/search?q={quote_plus("site:mtvuutiset.fi/makuja "+title)}',f'https://www.bing.com/search?q={quote_plus("site:mtvuutiset.fi/makuja "+title)}']
-              best=[]
-              for page in pages:
-                  if not page:continue
-                  try:r=sess().get(page,timeout=18)
-                  except:continue
-                  src=r.text
-                  urls=[]
-                  for m in URL_RE.finditer(src):urls.append(decode_url(m.group(0)))
-                  # Also catch fully escaped absolute URLs.
-                  for m in re.finditer(r'https:\\/\\/www\.mtvuutiset\.fi\\/makuja\\/(?:artikkeli|sivumaku\\/blogi)\\/[^" ]+?\\/\d{6,8}',src):urls.append(decode_url(m.group(0)))
-                  for u in set(urls):
-                      path=unquote(urlparse(u).path).replace('-',' ')
-                      sc=score(path,title)
-                      # Nearby title strings can improve score.
-                      pos=src.find(u.replace('/','\\/'))
-                      nearby=src[max(0,pos-1200):pos+500] if pos>=0 else ''
-                      sc=max(sc,score(nearby,title)*.75)
-                      best.append((sc,u))
-                  if best and max(best)[0]>=.48:break
-              return max(best)[1] if best and max(best)[0]>=.35 else ''
-          def one(ix,e):
-              url=e.get('href','') if e.get('direct') and '/haku?' not in e.get('href','') else resolve_search(e)
-              if not url:return ix,{**e,'resolved_url':'','extract_status':'UNRESOLVED_URL','recipe_lines':[]}
+          def one(i,e):
+              rinfo=resolved.get(e['name'],{})
+              url=e.get('href','') if e.get('direct') and '/haku?' not in e.get('href','') else rinfo.get('url','')
+              if not url:return i,{**e,'resolved_url':'','resolve_score':rinfo.get('score',0),'extract_status':'UNRESOLVED_URL','recipe_lines':[]}
               try:
-                  r=sess().get(url,timeout=25); src=r.text; lines=extract_article(src,e['name']); chars=len('\n'.join(lines))
-                  status='OK' if chars>=120 else 'SHORT_EXTRACTION'
-                  return ix,{**e,'resolved_url':r.url,'extract_status':status,'recipe_lines':lines}
-              except Exception as ex:return ix,{**e,'resolved_url':url,'extract_status':f'ERROR_{type(ex).__name__}','recipe_lines':[]}
+                  rr=sess().get(url,timeout=30);lines=extract(rr.text,e['name']);chars=len('\n'.join(lines));units=sum(bool(UNIT.search(x)) for x in lines)
+                  # Small sauces/dips may legitimately be short, so accept either substantial text or ingredient evidence + instructions/prose.
+                  status='OK' if (chars>=120 and (units>=1 or len(lines)>=5)) else 'SHORT_EXTRACTION'
+                  return i,{**e,'resolved_url':rr.url,'resolve_score':rinfo.get('score',1 if e.get('direct') else 0),'extract_status':status,'recipe_lines':lines,'unit_lines':units}
+              except Exception as ex:return i,{**e,'resolved_url':url,'resolve_score':rinfo.get('score',0),'extract_status':f'ERROR_{type(ex).__name__}','recipe_lines':[]}
           results=[None]*len(entries)
-          with ThreadPoolExecutor(max_workers=6) as pool:
-              futs=[pool.submit(one,i,e) for i,e in enumerate(entries)];done=0
-              for f in as_completed(futs):
+          with ThreadPoolExecutor(max_workers=7) as pool:
+              fs=[pool.submit(one,i,e) for i,e in enumerate(entries)];done=0
+              for f in as_completed(fs):
                   i,r=f.result();results[i]=r;done+=1
-                  if done%25==0 or done==len(entries):print('Done',done,'OK',sum(1 for x in results if x and x['extract_status']=='OK'),'unresolved',sum(1 for x in results if x and x['extract_status']=='UNRESOLVED_URL'),flush=True)
+                  if done%30==0 or done==len(entries):print('extract',done,'OK',sum(1 for x in results if x and x['extract_status']=='OK'),flush=True)
+          # Export exactly in the site's group order and index order within each group.
           by={g:[] for g in GROUPS}
           for r in results:by.setdefault(r.get('group') or 'Muut',[]).append(r)
-          out=['SIVUMAKU – MTV-RESEPTIT 2012–2019','',f'Reseptejä indeksissä: {len(results)}','Ryhmittely: sama kuin Sivumaku-reseptisivulla','']
+          out=['SIVUMAKU – MTV-RESEPTIT 2012–2019','',f'Reseptejä: {len(results)}','Ryhmittely: sama kuin Sivumaku-reseptisivulla','']
           for g in GROUPS:
               items=by.get(g,[])
               if not items:continue
               out+=['='*80,f'{g.upper()} ({len(items)})','='*80,'']
               for r in items:
-                  out+=[r['name'],' · '.join(x for x in [r.get('date',''),r.get('subgroup','')] if x),'Lähde: '+(r.get('resolved_url') or r.get('href',''))]
-                  out+=r['recipe_lines'] or [f'[RESEPTITEKSTIÄ EI SAATU AUTOMAATTISESTI – {r["extract_status"]}]'];out.append('')
-          Path('Sivumaku_324_reseptia.txt').write_text('\n'.join(out),encoding='utf-8')
-          Path('Sivumaku_324_reseptia.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
-          report=['name\tgroup\tdate\toriginal_url\tresolved_url\tstatus\tchars']
+                  out += [r['name']]
+                  meta=' · '.join(x for x in [r.get('date',''),r.get('subgroup','')] if x)
+                  if meta:out.append(meta)
+                  out.append('Lähde: '+(r.get('resolved_url') or r.get('href','')))
+                  out += r['recipe_lines'] if r['recipe_lines'] else [f'[RESEPTITEKSTI PUUTTUU – {r["extract_status"]}]']
+                  out.append('')
+          Path('Sivumaku_324_reseptia_LOPULLINEN.txt').write_text('\n'.join(out),encoding='utf-8')
+          Path('Sivumaku_324_reseptia_LOPULLINEN.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+          report=['name\tgroup\tdirect\tresolve_score\tresolved_url\tstatus\tchars\tunit_lines']
           for r in results:
-              vals=[r['name'],r.get('group',''),r.get('date',''),r.get('href',''),r.get('resolved_url',''),r['extract_status'],str(len('\n'.join(r['recipe_lines'])))]
+              vals=[r['name'],r.get('group',''),str(r.get('direct')),str(r.get('resolve_score','')),r.get('resolved_url',''),r['extract_status'],str(len('\n'.join(r['recipe_lines']))),str(r.get('unit_lines',''))]
               report.append('\t'.join(v.replace('\t',' ') for v in vals))
-          Path('Sivumaku_324_keruuraportti.tsv').write_text('\n'.join(report),encoding='utf-8')
-          print('FINAL', {s:sum(r['extract_status']==s for r in results) for s in sorted(set(r['extract_status'] for r in results))},flush=True)
+          Path('Sivumaku_324_laatutarkistus.tsv').write_text('\n'.join(report),encoding='utf-8')
+          print('FINAL STATUS', {s:sum(r['extract_status']==s for r in results) for s in sorted(set(r['extract_status'] for r in results))})
+          print('LOW RESOLVE',sum(1 for r in results if not r.get('direct') and r.get('resolve_score',0)<.45))
       - uses: actions/upload-artifact@v4
         with:
-          name: sivumaku-324-reseptia
+          name: sivumaku-324-lopullinen
           path: |
-            Sivumaku_324_reseptia.txt
-            Sivumaku_324_reseptia.json
-            Sivumaku_324_keruuraportti.tsv
+            Sivumaku_324_reseptia_LOPULLINEN.txt
+            Sivumaku_324_reseptia_LOPULLINEN.json
+            Sivumaku_324_laatutarkistus.tsv
+            resolved_urls.json
           retention-days: 1
