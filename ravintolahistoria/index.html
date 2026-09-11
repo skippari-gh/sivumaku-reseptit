@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#eceae5">
   <title>Mitä tässä ennen oli? – Tampereen ravintolahistoria | Sivumaku</title>
   <meta name="description" content="Tampereen ravintolahistoria kartalla. Hae ravintolalla tai osoitteella ja katso, mitä paikassa oli ennen.">
   <meta property="og:title" content="Mitä tässä ennen oli? – Tampereen ravintolahistoria">
@@ -12,22 +13,37 @@
   <meta property="og:image" content="https://commons.wikimedia.org/wiki/Special:FilePath/N%C3%A4sinneula%20view%2020.jpg?width=1600">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://www.sivumaku.fi/ravintolahistoria/">
-  <style>
-    html,body{width:100%;height:100%;margin:0;background:#eceae5;overflow:hidden}
-    iframe{display:block;width:100%;height:100%;border:0;background:#eceae5}
-    .fallback{position:fixed;left:16px;right:16px;bottom:16px;z-index:2;text-align:center;font:14px/1.4 system-ui,sans-serif;color:#182124}
-    .fallback a{color:#2e4a4c;font-weight:700}
-    @media(min-width:700px){.fallback{display:none}}
-  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <iframe
-    src="https://mita-tassa-ennen-oli-0dot08.v2.appdeploy.ai/"
-    title="Mitä tässä ennen oli? – Tampereen ravintolahistoria"
-    allow="geolocation; clipboard-write; fullscreen"
-    loading="eager"
-    referrerpolicy="strict-origin-when-cross-origin"
-  ></iframe>
-  <noscript><p class="fallback">Palvelu tarvitsee JavaScriptin. <a href="https://mita-tassa-ennen-oli-0dot08.v2.appdeploy.ai/">Avaa palvelu tästä.</a></p></noscript>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand"><span class="tre">TRE</span><span><b>Mitä tässä ennen oli?</b><small>VAIN TAMPERE · RAVINTOLAHISTORIA</small></span></div>
+      <span class="beta">JULKINEN BETA</span>
+    </header>
+    <div class="cityribbon"><span>TAMPERE</span><i>·</i><span>RAVINTOLAT</span><i>·</i><span>BAARIT</span><i>·</i><span>YÖKERHOT</span><i>·</i><span>OSOITTEET</span><i>·</i><span>MUISTOT</span></div>
+    <section class="hero">
+      <div class="krow"><div class="k">SIVUMAKU · TAMPERE</div><span class="scope">VAIN TAMPERE</span></div>
+      <div class="cityword" aria-hidden="true">TAMPERE</div>
+      <div class="herotag">Tampere vaihtuu. Osoitteet muistavat.</div>
+      <h1>Mitä tässä ennen oli?</h1>
+      <p class="promise"><strong>Hae ravintolan nimellä tai osoitteella.</strong> Näet, mitä samassa paikassa toimi ennen – aikajanoina, kartalla ja kuvina.</p>
+      <p class="betanote"><strong>Ensimmäinen beta:</strong> 5 Tampereen osoitetta. Aineisto täydentyy jatkuvasti.</p>
+      <label class="search"><span>⌕</span><input id="q" type="search" autocomplete="off" placeholder="Hae Tampereelta: NiteTrain, Maxim, Hämeenkatu 10…" aria-label="Hae ravintolaa tai osoitetta"><button class="clear" id="clear" aria-label="Tyhjennä haku">×</button></label>
+      <div class="actions"><button class="btn primary" id="near">◎ Lähimmät Tampereen kohteet</button><button class="btn light" id="random">Yllätä minut</button><a class="btn light" href="#time">Valitse vuosi ↓</a></div>
+      <div class="locmsg" id="locmsg"></div>
+    </section>
+    <section class="guide" id="guide"><div class="gcopy"><div class="k">JULKINEN BETA · TAMPERE</div><b>Kokeile kolmella tavalla</b><small>Hae tuttu paikka, katso lähimmät tai hyppää vuoteen 1995. Et tarvitse tunnusta.</small></div><div class="gactions"><button id="gsearch"><span>⌕</span><b>Hae tuttu paikka</b><small>Ravintola tai osoite</small></button><button id="gnear"><span>◎</span><b>Lähimmät Tampereella</b><small>Järjestä sijaintisi mukaan</small></button><button id="g95"><span>95</span><b>Tampere vuonna 1995</b><small>Aikakone näyttää tunnetut kohteet</small></button></div><button class="gclose" id="gclose" aria-label="Sulje aloitusvinkit">×</button></section>
+    <section class="tm" id="time"><div><div class="k">AIKAKONE</div><h2 id="timeh">Valitse vuosi</h2><p>Katso vain siihen vuoteen ajoitetut ravintolat. Epätarkkaa ajankohtaa ei esitetä tarkkana vuosilukuna.</p></div><div><div class="read" id="read">Kaikki</div><input class="range" id="range" type="range" min="1937" max="2026" value="2026" aria-label="Valitse vuosi"><div class="years"><button data-y="1988">1988</button><button data-y="1995">1995</button><button data-y="2004">2004</button><button data-y="2011">2011</button><button class="on" data-y="all">Kaikki</button></div></div></section>
+    <div class="switch"><button id="maptab" class="on">⌖ Kartta</button><button id="listtab">☷ Lista <span id="count"></span></button></div>
+    <section class="grid mapmode" id="explore"><div class="card mapcard"><div id="map"></div></div><div class="card listcard"><div class="listhead"><div><div class="k">OSOITTEET</div><h2 id="listh">Tampere</h2></div><small id="visible"></small></div><div class="list" id="list"></div></div></section>
+    <section class="tour" id="tour"><div class="k">OMA KIERROS</div><h2 id="tourh">Tallenna kiinnostavat paikat</h2><p id="tourp">Tähdellä tallennetut kohteet jäävät vain tähän selaimeen. Kirjautumista ei tarvita.</p><div class="tourlist" id="tourlist"></div><div class="touractions" id="touractions"></div></section>
+    <footer class="footer"><b>Mitä tässä ennen oli? · VAIN TAMPERE</b><br>Tampereen ravintolahistoria kartalla · beta · aineisto täydentyy · Hero-kuva: Wikimedia Commons</footer>
+  </div>
+  <div class="backdrop" id="backdrop"><article class="sheet" id="sheet" role="dialog" aria-modal="true" tabindex="-1"><div class="sheetnav"><button id="prev" aria-label="Edellinen kohde">←</button><span id="position"></span><button id="next" aria-label="Seuraava kohde">→</button></div><button class="close" id="close" aria-label="Sulje">×</button><div id="sheetbody"></div><div class="sheeta"><button class="btn dark" id="save"></button><button class="btn light" id="share">Jaa</button></div></article></div>
+  <nav class="dock"><button id="docksearch"><span>⌕</span>Haku</button><button id="docknear"><span>◎</span>Lähellä</button><a href="#time"><span>⌛</span>Vuosi</a><a href="#tour"><span id="dockstar">☆</span>Kierros</a></nav>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="./main.js"></script>
 </body>
 </html>
