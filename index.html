@@ -68,6 +68,15 @@ mark{background:#f5db7c;color:inherit;border-radius:3px;padding:0 1px}
   .cat-btn{white-space:nowrap;border:1px solid #d8d1c5;background:#fff}
   .recipe-list{grid-template-columns:1fr}
 }
+
+.history-promo{max-width:1132px;margin:24px auto;padding:22px 24px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:13px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.history-promo h2{font-family:Georgia,"Times New Roman",serif;font-size:26px;line-height:1.2;margin:0 0 8px}
+.history-promo p{margin:0;color:var(--muted);line-height:1.55}
+.history-promo a{display:inline-block;flex-shrink:0;background:var(--accent);color:#fff;padding:12px 18px;border-radius:9px;font-weight:700;text-decoration:none}
+.history-promo a:hover{background:var(--accent2)}
+.history-promo a:focus-visible{outline:3px solid var(--ink);outline-offset:4px}
+@media(max-width:1180px){.history-promo{margin:20px 24px}}
+@media(max-width:650px){.history-promo{flex-direction:column;align-items:flex-start;padding:20px;gap:16px}.history-promo h2{font-size:24px}}
 </style>
 </head>
 <body>
@@ -84,6 +93,15 @@ mark{background:#f5db7c;color:inherit;border-radius:3px;padding:0 1px}
     </div>
   </div>
 </header>
+
+<section class="history-promo" aria-labelledby="history-title">
+  <div>
+    <h2 id="history-title">Tutustu Tampereen ravintolahistoriaan</h2>
+    <p>Mitä ravintoloita tutuissa osoitteissa on vuosien varrella toiminut? Tutki Tampereen nykyisiä ja entisiä ravintoloita.</p>
+  </div>
+  <a href="https://ravintolahistoria.sivumaku.fi">Tutki ravintolahistoriaa →</a>
+</section>
+
 
 <div class="toolbar-shell">
   <div class="toolbar">
