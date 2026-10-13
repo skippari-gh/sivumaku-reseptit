@@ -131,11 +131,11 @@ mark{background:#f5db7c;color:inherit;border-radius:3px;padding:0 1px}
 
   <section>
     <div class="results-head">
-      <div><h2 id="view-title">Kaikki reseptit</h2><p id="result-count"></p></div>
+      <div><h2 id="view-title">Kaikki reseptit</h2><p id="result-count" role="status" aria-live="polite"></p></div>
       <p>↗ avautuu MTV:n sivulle</p>
     </div>
     <div id="content"></div>
-    <div class="empty" id="empty">Hakuehdoilla ei löytynyt reseptejä.</div>
+    <div class="empty" id="empty" role="status">Hakuehdoilla ei löytynyt reseptejä. Kokeile toista hakusanaa tai poista vuosirajaus.</div>
     <div class="note">
       <strong>Linkkien tila:</strong> vihreä “MTV-resepti” tarkoittaa varmennettua suoraa reseptisivua.
       Ruskea “MTV-haku” tarkoittaa, että resepti kuuluu masteriin, mutta alkuperäinen suora URL on vielä palauttamatta;
@@ -161,7 +161,7 @@ const YEARS=[2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019];
 let state={q:"",year:"all",group:"all"};
 
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
-const norm=s=>String(s??"").toLocaleLowerCase("fi");
+const norm=s=>String(s??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLocaleLowerCase("fi").replace(/[^\p{L}\p{N}]+/gu," ").trim();
 
 function groupCounts(items){
   const m={};
@@ -194,7 +194,7 @@ function filtered(){
   return DATA.filter(x=>{
     if(state.year!=="all" && String(x.year)!==state.year)return false;
     if(state.group!=="all" && x.group!==state.group)return false;
-    if(q && !norm(x.name+" "+x.group+" "+x.subgroup+" "+(x.year||"")).includes(q))return false;
+    if(q && !q.split(/\s+/).every(word=>norm([x.name,x.group,x.subgroup,x.year].join(" ")).includes(word)))return false;
     return true;
   });
 }
@@ -209,12 +209,13 @@ function itemHTML(x){
 }
 function render(){
   const items=filtered();
+  document.body.classList.toggle("is-searching",Boolean(state.q.trim()));
   const content=document.getElementById("content");
   const empty=document.getElementById("empty");
   const title=document.getElementById("view-title");
   const count=document.getElementById("result-count");
   title.textContent=state.group==="all"?"Kaikki reseptit":state.group;
-  count.textContent=`${items.length} reseptiä`+(state.year!=="all"?` · ${state.year}`:"");
+  count.textContent=`${items.length} reseptiä`+(state.year!=="all"?` · ${state.year}`:"")+(state.q.trim()?` · haku: ${state.q.trim()}`:"");
   if(!items.length){content.innerHTML="";empty.style.display="block";return;}
   empty.style.display="none";
   const groups=GROUPS.filter(g=>items.some(x=>x.group===g));
