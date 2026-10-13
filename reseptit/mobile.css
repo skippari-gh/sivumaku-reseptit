@@ -38,3 +38,14 @@ html,body{max-width:100%!important;overflow-x:hidden!important}body{width:100%!i
   .toolbar{padding-left:10px!important;padding-right:10px!important}
   .recipe a.name{font-size:17px!important}
 }
+
+/* Mobile: search results must appear immediately, not after all categories. */
+@media(max-width:850px){
+  body.is-searching .layout{padding-top:12px!important}
+  body.is-searching .sidebar{display:none!important}
+  body.is-searching .results-head{margin-bottom:12px!important}
+  .cat-btn{position:relative;isolation:isolate;transform:translateZ(0);-webkit-font-smoothing:antialiased}
+  .cat-btn span{opacity:1!important;visibility:visible!important;color:#3d474e!important}
+  .cat-btn.active{background:#1e2a31!important;border-color:#1e2a31!important}
+  .cat-btn.active span{color:#fff!important}
+}
